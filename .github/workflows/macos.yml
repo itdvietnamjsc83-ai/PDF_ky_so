@@ -1,5 +1,5 @@
 # Đóng gói bản macOS trên máy Mac thật của GitHub (không cần tự có máy Mac):
-#   macos-14 = Apple M (arm64), macos-13 = Intel (x86_64).
+#   macos-14 = Apple M (arm64), macos-15-intel = Intel (x86_64).
 # Ký & công chứng: thêm các "Secrets" trong Settings → Secrets and variables → Actions của kho mã:
 #   MAC_CERT_P12_BASE64   chứng thư "Developer ID Application" (+ "Developer ID Installer") xuất ra .p12, mã hóa base64
 #   MAC_CERT_PASSWORD     mật khẩu file .p12
@@ -7,8 +7,8 @@
 #   MAC_INSTALLER_ID      vd. Developer ID Installer: Ten Cong Ty (TEAMID)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   (mật khẩu dành riêng cho ứng dụng, tạo ở appleid.apple.com)
 # Không có Secrets -> vẫn build được bản ký tạm để thử (chưa gửi khách được).
-# Lưu ý: file app/license_key.py trong kho mã phải là khóa công khai THẬT (đã chạy tools/keygen.py init);
-# khóa bí mật / cụm mật khẩu tuyệt đối không đưa lên GitHub.
+# Khóa bản quyền / branding thật: Secrets PDFKYSO_LICENSE_KEY_PY, PDFKYSO_BRANDING_PY (xem tools/ci_secrets.py);
+# khóa bí mật / cụm mật khẩu và bộ tạo key tuyệt đối không đưa lên GitHub.
 name: macos-build
 on: [workflow_dispatch]
 jobs:
@@ -18,13 +18,18 @@ jobs:
       matrix:
         include:
           - { runner: macos-14, arch: arm64 }
-          - { runner: macos-13, arch: x86_64 }
+          - { runner: macos-15-intel, arch: x86_64 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
+      - name: Nạp khóa bản quyền & thông tin công ty thật (GitHub Secrets, nếu có)
+        env:
+          PDFKYSO_LICENSE_KEY_PY: ${{ secrets.PDFKYSO_LICENSE_KEY_PY }}
+          PDFKYSO_BRANDING_PY: ${{ secrets.PDFKYSO_BRANDING_PY }}
+        run: python tools/ci_secrets.py
       - name: Nạp chứng thư ký mã vào keychain tạm (nếu có)
         env:
           P12: ${{ secrets.MAC_CERT_P12_BASE64 }}
