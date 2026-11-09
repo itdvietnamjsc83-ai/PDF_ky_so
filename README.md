@@ -421,6 +421,11 @@ Khi đặt ảnh, con dấu, chữ ký ảnh, nét chữ tay của mình lên tr
   màu "Màu chủ đạo – đều màu" cho dấu mờ loang.
 - **Giáp lai như đóng thật:** kiểu "Tự nhiên" (mảnh rộng hẹp không đều như xếp giấy so le, lệch nhẹ, mực đậm nhạt),
   nghiêng dấu, **mỗi dấu qua tối đa N trang** (tập dày tự gợi ý 8), cách mép giấy, hình minh họa trước khi đóng.
+- **Bộ chữ tay của chính mình:** phiếu mẫu mới 2 trang, ô to 21 x 28 mm, nhãn in rõ phía trên ô, đường kẻ chân chữ +
+  đường chấm chiều cao chữ như vở ô ly; trang 1 (chữ thường, số, dấu thanh) bắt buộc, trang 2 (chữ hoa, dấu câu) nên có.
+  Nạp 1 file PDF hoặc ảnh từng trang -> **bảng xem lại** từng chữ đã cắt: kéo lại khung cắt, chỉnh độ tách nền (từng chữ
+  hoặc tất cả), bỏ chữ, **viết lại bằng chuột / bút cảm ứng**. Phiếu cũ (v1) vẫn đọc được. Chữ viết tay bằng phông
+  giờ thành hộp chữ, nháy đúp sửa ngay trên trang.
 - **Giao diện tối:** bảng hình vẽ, bút vẽ tay, ghi chú, so sánh/ký hàng loạt, bảng kiểm tra chữ ký đổi màu theo nền tối.
 - Bỏ `--include-package-data=tzdata` thừa trong `build_windows.bat`; kiểm thử hết cảnh báo Pillow `getdata`.
 

@@ -461,3 +461,89 @@ def test_seam_dialog_options(qapp, tmp_path):
     dlg.sp_angle.setValue(6)
     v = dlg.values()
     assert v["natural"] and v["angle"] == 6 and v["group_size"] == 8
+
+
+# ------------------------------------------------------------------ phiếu chữ tay v2 (2 trang, ô to) + xem lại
+def _filled_v2(pages=(1, 2), rotate=1.0, missing=(), as_pdf=False):
+    import io
+    from PIL import ImageDraw, ImageFont
+    from app import fonts, handwriting as hw
+    d = PdfDocument(data=hw.make_template())
+    imgs = []
+    f = ImageFont.truetype(fonts.handwriting_path("PatrickHand.ttf"), 170)
+    mm = 300 / 25.4
+    marks = {"̀": "`", "́": "/", "̉": "?", "̃": "~", "̣": "."}
+    for page in pages:
+        img = d.render(page - 1, 300 / 72).to_pil().convert("RGB")
+        dr = ImageDraw.Draw(img)
+        for k, ch in enumerate(hw.V2_PAGES[page - 1]):
+            if ch in missing:
+                continue
+            x0, y0, x1, y1 = hw.v2_cell_mm(page, k)
+            dr.text(((x0 + 5) * mm, (y0 + hw.V2_H * hw.BASELINE) * mm), marks.get(ch, ch), font=f,
+                    fill=(20, 40, 160), anchor="ls")
+        imgs.append(img.rotate(rotate, expand=True, fillcolor=(255, 255, 255)))
+    d.close()
+    if as_pdf:
+        b = io.BytesIO()
+        imgs[0].save(b, "PDF", resolution=300, save_all=True, append_images=imgs[1:])
+        return [b.getvalue()]
+    out = []
+    for im in imgs:
+        b = io.BytesIO()
+        im.save(b, "JPEG", quality=85)
+        out.append(b.getvalue())
+    return out
+
+
+def test_handwriting_v2_two_pages_and_page_detection():
+    from app import handwriting as hw
+    ex = hw.extract_cells(_filled_v2(as_pdf=True))
+    assert ex["version"] == 2 and sorted(ex["pages"]) == [1, 2] and len(ex["cells"]) == len(hw.CHARS)
+    hs = hw.HandSet(hw.parse_scan(_filled_v2(pages=(2, 1))))                  # 2 ảnh, thứ tự nào cũng được
+    assert hs.coverage > 0.95
+    im = hs.render("Nguyễn Văn Hùng", height_px=120)
+    assert im.width > im.height
+
+
+def test_handwriting_v2_page1_only_uses_lowercase_for_capitals():
+    from app import handwriting as hw
+    hs = hw.HandSet(hw.parse_scan(_filled_v2(pages=(1,))))
+    assert hs.has("a") and not hs.has("A")
+    assert hs.render("An", height_px=100).width > 10                          # chữ hoa dùng tạm chữ thường
+
+
+def test_handwriting_review_adjust_crop_and_drop():
+    from app import handwriting as hw
+    ex = hw.extract_cells(_filled_v2(pages=(1,), rotate=0))
+    cell = ex["cells"]["b"]
+    full = hw.process_cell(cell)
+    assert full is not None
+    left = hw.process_cell(cell, rect=(0, 0, 40, hw.SPRITE_H))               # khung cắt hẹp: bỏ nét ngoài khung
+    assert left is None or left.getchannel("A").getbbox()[2] <= 40
+    assert hw.process_cell(ex["cells"]["b"].crop((0, 0, 1, 1)).resize(cell.size)) is None   # ô trắng
+
+
+def test_hand_review_dialog_flow(qapp, monkeypatch):
+    from PySide6.QtCore import QPointF
+    from app import handwriting as hw
+    from app.ui_edit import HandReviewDialog
+    ex = hw.extract_cells(_filled_v2(pages=(1,), missing=("k",)))
+    dlg = HandReviewDialog(None, ex)
+    assert dlg.list.count() == len(hw.V2_PAGES[0])
+    assert dlg.cur == "k" and dlg.glyphs["k"] is None                  # mở ngay ô trống đầu tiên
+    assert "trang 2" in dlg.info.text().lower()
+    # viết lại chữ k bằng chuột
+    dlg.btn_draw.setChecked(True)
+    dlg.pad.strokes = [[QPointF(60, 40), QPointF(60, 250)], [QPointF(150, 120), QPointF(60, 190), QPointF(150, 250)]]
+    dlg.btn_draw.setChecked(False)
+    assert dlg.glyphs["k"] is not None
+    # bỏ chữ a, thu hẹp khung chữ b
+    dlg.list.setCurrentRow(dlg.order.index("a"))
+    dlg.btn_drop.setChecked(True)
+    assert dlg.glyphs["a"] is None
+    dlg.list.setCurrentRow(dlg.order.index("b"))
+    dlg.crop.rectChanged.emit((0, 0, 30, 30))
+    assert dlg.glyphs["b"] is None or dlg.glyphs["b"].getchannel("A").getbbox()[2] <= 30
+    hs = hw.HandSet(dlg.sprite())
+    assert hs.has("k") and not hs.has("a")

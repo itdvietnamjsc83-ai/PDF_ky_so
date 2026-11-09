@@ -14,7 +14,7 @@ import io
 import random
 import unicodedata
 
-VERSION = 1
+VERSION = 2
 LOWER = list("abcdefghijklmnopqrstuvwxyz") + list("ăâđêôơư")
 UPPER = [c.upper() for c in LOWER]
 DIGITS = list("0123456789")
@@ -52,8 +52,80 @@ def label(ch: str) -> str:
 
 
 # ------------------------------------------------------------------ 1. phiếu mẫu
-def make_template(path: str | None = None) -> bytes:
-    """Tạo phiếu mẫu chữ (PDF A4) – dùng chính lõi PDF của phần mềm."""
+# 1.0.22 – phiếu v2 dễ viết hơn: 2 trang, ô to (21 x 28 mm), nhãn in RÕ phía trên ô (không lẫn vào ô viết),
+# đường kẻ chân chữ + đường giữa chữ mờ như vở ô ly. Trang 1 (bắt buộc): chữ thường, số, dấu thanh.
+# Trang 2 (nên có): chữ hoa, dấu câu – thiếu trang 2 thì chữ hoa dùng tạm chữ thường.
+V2_PAGES = [LOWER + DIGITS + TONES, UPPER + PUNCT]
+V2_COLS = 8
+V2_W, V2_H = 21.0, 28.0            # ô viết (đúng tỉ lệ 3:4 của ảnh gộp)
+V2_LABEL = 5.0                     # dải nhãn phía trên ô
+V2_PITCH_X, V2_PITCH_Y = 22.5, 35.0
+V2_X0, V2_Y0 = 15.0, 50.0
+V2_XHEIGHT = 0.45                  # đường giữa chữ (chiều cao chữ thường)
+PAGE_ID_Y = 281.0                  # ô nhận diện trang (giữa mép dưới): trang 1 một ô, trang 2 hai ô
+PAGE_ID = {1: [(97.0, PAGE_ID_Y)], 2: [(85.0, PAGE_ID_Y), (109.0, PAGE_ID_Y)]}
+PAGE_ID_SIZE = 6.0
+
+
+def v2_cell_mm(page: int, k: int):
+    """Ô viết thứ k của trang page (1, 2) theo mm: (x0, y0, x1, y1) – không gồm dải nhãn."""
+    r, c = divmod(k, V2_COLS)
+    x = V2_X0 + c * V2_PITCH_X
+    y = V2_Y0 + r * V2_PITCH_Y + V2_LABEL
+    return x, y, x + V2_W, y + V2_H
+
+
+def make_template(path: str | None = None, version: int = 2) -> bytes:
+    """Tạo phiếu mẫu chữ (PDF A4) – dùng chính lõi PDF của phần mềm. version=1: phiếu cũ 1 trang 95 ô."""
+    if version == 1:
+        return _make_template_v1(path)
+    from . import editing, fonts
+    from .document import PdfDocument
+    mm = 72 / 25.4
+    d = PdfDocument()
+    d.insert_blank(-1)
+    d.insert_blank(0)
+    font = fonts.system_font("sans")
+    for pi, chars in enumerate(V2_PAGES):
+        page = pi + 1
+        shapes = [("rect", (x * mm, y * mm, (x + MARK) * mm, (y + MARK) * mm), None, 0, "#000000") for x, y in MARK_POS]
+        shapes += [("rect", (x * mm, y * mm, (x + PAGE_ID_SIZE) * mm, (y + PAGE_ID_SIZE) * mm), None, 0, "#000000")
+                   for x, y in PAGE_ID[page]]
+        what = ("Trang 1/2 – chữ thường, chữ số, dấu thanh (bắt buộc)" if page == 1 else
+                "Trang 2/2 – chữ hoa, dấu câu (nên viết; bỏ trống thì chữ hoa dùng tạm chữ thường)")
+        texts = [(22 * mm, 12 * mm, "PHIẾU MẪU CHỮ VIẾT TAY", 15, "#000000"),
+                 (22 * mm, 19.5 * mm, what, 9.5, "#000000"),
+                 (22 * mm, 26 * mm, "• Viết mỗi chữ vào giữa ô, CHÂN CHỮ CHẠM ĐƯỜNG KẺ ĐẬM (g, p, y, q thò xuống dưới); "
+                  "chữ thường cao tới đường chấm.\n• Ô dấu thanh: chỉ viết dấu, ở khoảng giữa ô. Không viết lên nhãn "
+                  "và 4 ô vuông đen ở góc.\n• Bút bi / bút ký xanh hoặc đen. Scan 300 dpi hoặc chụp thẳng, đủ sáng, "
+                  "cả trang (PDF nhiều trang hoặc từng ảnh đều được).\n• Sau khi nạp, phần mềm cho xem lại từng chữ đã "
+                  "cắt để chỉnh khung cắt hoặc viết lại chữ chưa đẹp.", 7.5, "#444444"),
+                 (15 * mm, 289 * mm, f"PDF Ký Số · mẫu chữ tay v2 · trang {page}", 6.5, "#999999")]
+        for k, ch in enumerate(chars):
+            x0, y0, x1, y1 = v2_cell_mm(page, k)
+            shapes.append(("rect", (x0 * mm, y0 * mm, x1 * mm, y1 * mm), "#c4c4c4", 0.5, None))
+            by = y0 + V2_H * BASELINE
+            shapes.append(("line", ((x0 + 1) * mm, by * mm, (x1 - 1) * mm, by * mm), "#bdbdbd", 0.7, None))
+            xy = by - V2_H * BASELINE * V2_XHEIGHT
+            xx = x0 + 1.2
+            while xx < x1 - 1.2:                                       # đường chấm: chiều cao chữ thường
+                shapes.append(("line", (xx * mm, xy * mm, (xx + 0.6) * mm, xy * mm), "#dadada", 0.4, None))
+                xx += 1.6
+            lab = label(ch) if ch in TONES else ch
+            size = 7.5 if ch in TONES else 10.5
+            tw = fonts.measure(font, lab, size) / mm
+            texts.append(((x0 + (V2_W - tw) / 2) * mm, (y0 - V2_LABEL + 0.6) * mm, lab, size, "#8a8a8a"))
+        editing.add_shapes(d, pi, shapes, snapshot=False)
+        editing.add_texts(d, pi, texts, font, snapshot=False)
+    data = d.to_bytes()
+    d.close()
+    if path:
+        with open(path, "wb") as f:
+            f.write(data)
+    return data
+
+
+def _make_template_v1(path: str | None = None) -> bytes:
     from . import editing, fonts
     from .document import PdfDocument
     mm = 72 / 25.4
@@ -65,7 +137,7 @@ def make_template(path: str | None = None) -> bytes:
              (22 * mm, 20.5 * mm, "Viết mỗi ký tự vào giữa ô, chân chữ chạm đường kẻ mờ (g, p, y… thò xuống dưới). "
               "Ô dấu thanh: chỉ viết dấu.\nDùng bút bi/bút ký màu xanh hoặc đen, không viết đè lên 4 ô vuông "
               "đen. Scan 300–600 dpi hoặc chụp thẳng cả trang.", 8, "#444444"),
-             (15 * mm, 281 * mm, f"PDF Ký Số · mẫu chữ tay v{VERSION}", 7, "#999999")]
+             (15 * mm, 281 * mm, "PDF Ký Số · mẫu chữ tay v1", 7, "#999999")]
     for k, ch in enumerate(CHARS):
         x0, y0, x1, y1 = cell_rect_mm(k)
         shapes.append(("rect", (x0 * mm, y0 * mm, x1 * mm, y1 * mm), "#c8c8c8", 0.4, None))
@@ -83,19 +155,22 @@ def make_template(path: str | None = None) -> bytes:
 
 
 # ------------------------------------------------------------------ 2. đọc bản scan
-def load_scan(data: bytes, dpi: int = 200):
-    """Ảnh (PNG/JPG…) hoặc PDF (trang đầu) -> ảnh PIL RGB."""
+def load_scans(data: bytes, dpi: int = 200, max_pages: int = 4) -> list:
+    """Ảnh (PNG/JPG…) hoặc PDF (tới 4 trang) -> danh sách ảnh PIL RGB."""
     from PIL import Image, ImageOps
     if data[:5] == b"%PDF-":
         from .document import PdfDocument
         d = PdfDocument(data=data)
         try:
-            img = d.render(0, dpi / 72).to_pil().convert("RGB")
+            return [d.render(i, dpi / 72).to_pil().convert("RGB") for i in range(min(max_pages, d.page_count))]
         finally:
             d.close()
-        return img
     img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
-    return img.convert("RGB")
+    return [img.convert("RGB")]
+
+
+def load_scan(data: bytes, dpi: int = 200):
+    return load_scans(data, dpi, 1)[0]
 
 
 def find_marks(img) -> list[tuple[float, float]]:
@@ -157,49 +232,123 @@ def _apply(h, x, y):
     return (h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d
 
 
-def parse_scan(data: bytes, threshold: int = 175) -> bytes:
-    """Bản scan phiếu mẫu -> ảnh gộp PNG (mỗi ô SPRITE_W x SPRITE_H, trong suốt, mực giữ màu)."""
+def _warp(img, H, x0, y0, x1, y1, size=(SPRITE_W, SPRITE_H)):
     from PIL import Image
+    quad = [_apply(H, x0, y0), _apply(H, x0, y1), _apply(H, x1, y1), _apply(H, x1, y0)]
+    return img.transform(size, Image.QUAD, [c for p in quad for c in p], Image.BICUBIC, fillcolor=(255, 255, 255))
+
+
+def page_kind(img, H) -> int:
+    """0 = phiếu cũ (v1), 1 / 2 = trang 1 / 2 của phiếu v2 – theo các ô nhận diện ở giữa mép dưới."""
+    def dark(x, y):
+        c = _warp(img, H, x + 1, y + 1, x + PAGE_ID_SIZE - 1, y + PAGE_ID_SIZE - 1, (12, 12)).convert("L")
+        return sum(c.histogram()[:110]) > 100
+    if dark(*PAGE_ID[2][0]) and dark(*PAGE_ID[2][1]):
+        return 2
+    if dark(*PAGE_ID[1][0]):
+        return 1
+    return 0
+
+
+def extract_cells(datas) -> dict:
+    """Các bản scan (1–2 trang phiếu, ảnh hoặc PDF) -> {"version", "pages", "cells": {ký tự: ảnh ô viết RGB}}.
+    Ảnh ô đã nắn thẳng, đúng cỡ SPRITE_W x SPRITE_H, CHƯA tách nền – để xem lại / chỉnh trước khi tạo bộ chữ."""
+    if isinstance(datas, (bytes, bytearray)):
+        datas = [bytes(datas)]
+    imgs = [im for data in datas for im in load_scans(data)]
+    cells, pages, version = {}, [], 2
+    last_err = None
+    for img in imgs:
+        try:
+            marks = find_marks(img)
+        except ValueError as e:
+            last_err = e
+            continue
+        H = homography(mark_centers_mm(), marks)          # mm trên phiếu -> pixel trên ảnh
+        kind = page_kind(img, H)
+        if kind == 0:                                     # phiếu cũ 1 trang 95 ô
+            version = 1
+            inset = 1.3
+            for k, ch in enumerate(CHARS):
+                x0, y0, x1, y1 = cell_rect_mm(k)
+                cells[ch] = _warp(img, H, x0 + inset, y0 + inset, x1 - inset, y1 - inset)
+            pages.append(0)
+            continue
+        inset = 0.9
+        for k, ch in enumerate(V2_PAGES[kind - 1]):
+            x0, y0, x1, y1 = v2_cell_mm(kind, k)
+            cells[ch] = _warp(img, H, x0 + inset, y0 + inset * 4 / 3, x1 - inset, y1 - inset * 4 / 3)
+        pages.append(kind)
+    if not cells:
+        raise last_err or ValueError("Không nhận ra phiếu mẫu chữ.")
+    return {"version": version, "pages": pages, "cells": cells}
+
+
+def default_rect(version: int):
+    """Khung cắt mặc định trong ô (px trên ảnh ô): v1 bỏ góc nhãn trên-trái; v2 cả ô."""
+    return (0, 0, SPRITE_W, SPRITE_H)
+
+
+def process_cell(cell, threshold: int = 175, rect=None, version: int = 2):
+    """Ảnh ô (RGB) -> ảnh chữ RGBA trong suốt, hoặc None nếu ô trống.
+    rect=(x0, y0, x1, y1) px: chỉ giữ nét bút trong khung này (người dùng kéo lại khung khi cắt chưa chuẩn)."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
     from .imaging import remove_background
-    img = load_scan(data)
-    marks = find_marks(img)
-    H = homography(mark_centers_mm(), marks)            # mm trên phiếu -> pixel trên ảnh
-    sheet = Image.new("RGBA", (SPRITE_W * COLS, SPRITE_H * ROWS), (0, 0, 0, 0))
-    inset = 1.3                                           # mm, tránh viền ô
-    found = 0
-    for k in range(len(CHARS)):
-        x0, y0, x1, y1 = cell_rect_mm(k)
-        x0, y0, x1, y1 = x0 + inset, y0 + inset, x1 - inset, y1 - inset
-        quad = [_apply(H, x0, y0), _apply(H, x0, y1), _apply(H, x1, y1), _apply(H, x1, y0)]
-        cell = img.transform((SPRITE_W, SPRITE_H), Image.QUAD, [c for p in quad for c in p], Image.BICUBIC,
-                             fillcolor=(255, 255, 255))
-        buf = io.BytesIO()
-        cell.save(buf, "PNG")
-        png = remove_background(buf.getvalue(), threshold=threshold, softness=35, boost=True, trim=False,
-                                max_side=10000)
-        g = Image.open(io.BytesIO(png)).convert("RGBA")
-        a = g.getchannel("A").point(lambda v: 0 if v < 90 else v)      # bỏ vết mờ: đường kẻ, bụi
-        # xóa vùng nhãn in sẵn ở góc trên-trái ô (máy in có thể in đậm hơn thiết kế)
-        from PIL import ImageDraw
+    buf = io.BytesIO()
+    cell.save(buf, "PNG")
+    png = remove_background(buf.getvalue(), threshold=threshold, softness=35, boost=True, trim=False,
+                            max_side=10000)
+    g = Image.open(io.BytesIO(png)).convert("RGBA")
+    a = g.getchannel("A").point(lambda v: 0 if v < 90 else v)      # bỏ vết mờ: đường kẻ, bụi
+    dr = ImageDraw.Draw(a)
+    if version == 1:            # xóa vùng nhãn in sẵn ở góc trên-trái ô (máy in có thể in đậm hơn thiết kế)
+        inset = 1.3
         lab_w = int((LABEL_W - inset) / (CELL_W - 2 * inset) * SPRITE_W)
         lab_h = int((LABEL_H - inset) / (CELL_H - 2 * inset) * SPRITE_H)
-        ImageDraw.Draw(a).rectangle((0, 0, lab_w, lab_h), fill=0)
-        # bỏ nét mảnh (viền ô, đường kẻ lọt vào khi scan lệch) và bụi: chỉ giữ vùng quanh nét bút thật
-        from PIL import ImageChops, ImageFilter
-        keep = a.point(lambda v: 255 if v > 90 else 0).filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(11))
-        a = ImageChops.multiply(a, keep)
-        g.putalpha(a)
-        # bỏ ô trống / chỉ có vết bẩn nhỏ
-        if sum(a.resize((45, 60)).histogram()[61:]) < 6:
+        dr.rectangle((0, 0, lab_w, lab_h), fill=0)
+    if rect is not None:
+        x0, y0, x1, y1 = [int(round(v)) for v in rect]
+        mask = Image.new("L", a.size, 0)
+        ImageDraw.Draw(mask).rectangle((x0, y0, x1 - 1, y1 - 1), fill=255)
+        a = ImageChops.multiply(a, mask)
+    # bỏ nét mảnh (viền ô, đường kẻ lọt vào khi scan lệch) và bụi: chỉ giữ vùng quanh nét bút thật
+    keep = a.point(lambda v: 255 if v > 90 else 0).filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(11))
+    a = ImageChops.multiply(a, keep)
+    g.putalpha(a)
+    if sum(a.resize((45, 60)).histogram()[61:]) < 6:               # ô trống / chỉ có vết bẩn nhỏ
+        return None
+    return g
+
+
+def build_sprite(glyphs: dict) -> bytes:
+    """{ký tự: ảnh RGBA SPRITE_W x SPRITE_H} -> ảnh gộp PNG lưu trong thư viện."""
+    from PIL import Image
+    sheet = Image.new("RGBA", (SPRITE_W * COLS, SPRITE_H * ROWS), (0, 0, 0, 0))
+    for k, ch in enumerate(CHARS):
+        g = glyphs.get(ch)
+        if g is None:
             continue
-        found += 1
+        if g.size != (SPRITE_W, SPRITE_H):
+            g = g.resize((SPRITE_W, SPRITE_H), Image.LANCZOS)
         r, c = divmod(k, COLS)
-        sheet.alpha_composite(g, (c * SPRITE_W, r * SPRITE_H))
-    if found < 10:
-        raise ValueError("Phiếu chưa có đủ chữ viết tay (tìm thấy quá ít ô có chữ).")
+        sheet.alpha_composite(g.convert("RGBA"), (c * SPRITE_W, r * SPRITE_H))
     out = io.BytesIO()
     sheet.save(out, "PNG", optimize=True)
     return out.getvalue()
+
+
+def parse_scan(data, threshold: int = 175) -> bytes:
+    """Bản scan phiếu mẫu (1 file hoặc danh sách file: ảnh / PDF) -> ảnh gộp PNG (mỗi ô SPRITE_W x SPRITE_H,
+    trong suốt, mực giữ màu). Không qua bước xem lại."""
+    ex = extract_cells(data)
+    glyphs = {}
+    for ch, cell in ex["cells"].items():
+        g = process_cell(cell, threshold, version=ex["version"])
+        if g is not None:
+            glyphs[ch] = g
+    if len(glyphs) < 10:
+        raise ValueError("Phiếu chưa có đủ chữ viết tay (tìm thấy quá ít ô có chữ).")
+    return build_sprite(glyphs)
 
 
 # ------------------------------------------------------------------ 3. ghép chữ

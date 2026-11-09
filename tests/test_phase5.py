@@ -256,8 +256,9 @@ def test_photo_without_dpi_unknown():
 
 # ------------------------------------------------------------------ bộ chữ tay
 def _filled_scan(rotate=1.5, missing=()):
+    """Phiếu cũ v1 (1 trang 95 ô) đã viết – bản 1.0.22 vẫn đọc được phiếu cũ."""
     from PIL import Image, ImageDraw, ImageFont
-    d = PdfDocument(data=hw.make_template())
+    d = PdfDocument(data=hw.make_template(version=1))
     img = d.render(0, 300 / 72).to_pil().convert("RGB")
     d.close()
     dr = ImageDraw.Draw(img)
@@ -282,6 +283,7 @@ def test_template_small_and_fast():
     assert time.perf_counter() - t < 2 and len(data) < 60_000
     d = PdfDocument(data=data)
     assert "PHIẾU MẪU CHỮ VIẾT TAY" in d.text(0) and len(hw.CHARS) <= hw.COLS * hw.ROWS
+    assert d.page_count == 2 and sorted(hw.V2_PAGES[0] + hw.V2_PAGES[1]) == sorted(hw.CHARS)
 
 
 def test_homography_exact():

@@ -1754,11 +1754,12 @@ class HandDialog(QDialog):
         v.addWidget(self.preview, 1)
         tools = QHBoxLayout()
         b1 = QPushButton("In phiếu mẫu chữ…")
-        b1.setToolTip("Lưu phiếu mẫu (PDF A4) để in ra, viết tay vào các ô")
+        b1.setToolTip("Lưu phiếu mẫu (PDF A4, 2 trang ô to) để in ra, viết tay vào các ô")
         b1.clicked.connect(self.save_template)
         b2 = QPushButton("Tạo bộ chữ tay từ bản scan…")
-        b2.setToolTip("Chọn ảnh scan/chụp phiếu mẫu đã viết -> tạo nét chữ của riêng bạn")
-        b2.clicked.connect(self.import_scan)
+        b2.setToolTip("Chọn ảnh scan/chụp phiếu mẫu đã viết (1 file PDF hoặc ảnh từng trang) -> xem lại từng chữ "
+                      "đã cắt -> tạo nét chữ của riêng bạn")
+        b2.clicked.connect(lambda: self.import_scan())
         tools.addWidget(b1)
         tools.addWidget(b2)
         tools.addStretch()
@@ -1837,8 +1838,10 @@ class HandDialog(QDialog):
         if IS_WIN or IS_MAC:
             open_path(path)                             # mở để in ngay
 
-    def import_scan(self, path: str | None = None, name: str | None = None):
-        from .handwriting import HandSet, parse_scan
+    def import_scan(self, path=None, name: str | None = None, review: bool | None = None):
+        """Nạp phiếu mẫu đã viết (1–2 trang: ảnh từng trang hoặc 1 file PDF) -> xem lại từng chữ đã cắt
+        (chỉnh khung cắt, độ tách nền, bỏ / viết lại chữ) -> lưu bộ chữ vào thư viện."""
+        from .handwriting import HandSet, extract_cells, parse_scan
         from .library import HANDSET
         from .ui_library import unlock_if_needed
         if self.library is None:
@@ -1846,13 +1849,27 @@ class HandDialog(QDialog):
         if not unlock_if_needed(self, self.library):
             return
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "Chọn bản scan phiếu mẫu đã viết", "",
-                                                  "Ảnh / PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.pdf)")
-            if not path:
+            paths, _ = QFileDialog.getOpenFileNames(self, "Chọn bản scan phiếu mẫu đã viết (chọn được cả 2 trang)", "",
+                                                    "Ảnh / PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.pdf)")
+            if not paths:
                 return
+        else:
+            paths = [path] if isinstance(path, str) else list(path)
+        if review is None:
+            review = name is None
         try:
-            with open(path, "rb") as f:
-                sprite = parse_scan(f.read())
+            datas = []
+            for p in paths:
+                with open(p, "rb") as f:
+                    datas.append(f.read())
+            if review:
+                ex = extract_cells(datas)
+                dlg = HandReviewDialog(self, ex)
+                if dlg.exec() != QDialog.Accepted:
+                    return
+                sprite = dlg.sprite()
+            else:
+                sprite = parse_scan(datas)
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"Không đọc được phiếu mẫu:\n{e}")
             return
@@ -2194,3 +2211,358 @@ class InlineFormatBar(QFrame):
             self.rejected.emit()
             return
         super().keyPressEvent(ev)
+
+
+# ------------------------------------------------------------------ 1.0.22: xem lại từng chữ đã cắt từ phiếu mẫu
+def _pil_from_qimage(img: QImage):
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.WriteOnly)
+    img.save(buf, "PNG")
+    return Image.open(io.BytesIO(bytes(ba))).convert("RGBA")
+
+
+class _CellCrop(QWidget):
+    """Ảnh ô gốc (đã nắn thẳng) phóng to + khung cắt kéo được: chỉ giữ nét bút trong khung."""
+    rectChanged = Signal(tuple)
+    ZOOM = 1.5
+
+    def __init__(self):
+        super().__init__()
+        from .handwriting import SPRITE_H, SPRITE_W
+        self.cw, self.ch = SPRITE_W, SPRITE_H
+        self.setFixedSize(int(self.cw * self.ZOOM), int(self.ch * self.ZOOM))
+        self.setCursor(Qt.CrossCursor)
+        self.img = None
+        self.rect_px = (0, 0, self.cw, self.ch)
+        self._start = None
+
+    def set_cell(self, pil_img, rect):
+        self.img = pil_to_qimage(pil_img.convert("RGB")) if pil_img is not None else None
+        self.rect_px = tuple(rect)
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#ffffff"))
+        if self.img is not None:
+            p.drawImage(self.rect(), self.img)
+        z = self.ZOOM
+        x0, y0, x1, y1 = self.rect_px
+        from PySide6.QtCore import QRectF
+        r = QRectF(x0 * z, y0 * z, (x1 - x0) * z, (y1 - y0) * z)
+        shade = QColor(0, 0, 0, 70)
+        full = QRectF(self.rect())
+        for part in (QRectF(0, 0, full.width(), r.top()), QRectF(0, r.bottom(), full.width(), full.height() - r.bottom()),
+                     QRectF(0, r.top(), r.left(), r.height()), QRectF(r.right(), r.top(), full.width() - r.right(), r.height())):
+            p.fillRect(part, shade)                                  # phần bị bỏ: tô tối
+        p.setPen(QPen(QColor("#005fb8"), 2, Qt.DashLine))
+        p.drawRect(r)
+        from .handwriting import BASELINE
+        p.setPen(QPen(QColor(229, 57, 53, 120), 1, Qt.DotLine))
+        p.drawLine(0, int(self.height() * BASELINE), self.width(), int(self.height() * BASELINE))
+        p.end()
+
+    def _pt(self, ev):
+        z = self.ZOOM
+        return (min(max(ev.position().x() / z, 0), self.cw), min(max(ev.position().y() / z, 0), self.ch))
+
+    def mousePressEvent(self, ev):
+        self._start = self._pt(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._start is None:
+            return
+        (ax, ay), (bx, by) = self._start, self._pt(ev)
+        if abs(ax - bx) > 3 and abs(ay - by) > 3:
+            self.rect_px = (min(ax, bx), min(ay, by), max(ax, bx), max(ay, by))
+            self.update()
+
+    def mouseReleaseEvent(self, ev):
+        if self._start is not None:
+            self._start = None
+            self.rectChanged.emit(self.rect_px)
+
+
+class _CellPad(DrawPad):
+    """Viết lại một chữ bằng chuột / bút cảm ứng, đúng khung ô (chân chữ chạm đường đỏ)."""
+
+    def __init__(self):
+        super().__init__()
+        from .handwriting import SPRITE_H, SPRITE_W
+        self.cw, self.ch = SPRITE_W, SPRITE_H
+        z = _CellCrop.ZOOM
+        self.setMinimumSize(0, 0)
+        self.setFixedSize(int(self.cw * z), int(self.ch * z))
+        self.pen_width = 6.0
+
+    def paintEvent(self, ev):
+        from .handwriting import BASELINE, V2_XHEIGHT
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#ffffff"))
+        y = self.height() * BASELINE
+        p.setPen(QPen(QColor(229, 57, 53, 150), 1.5))
+        p.drawLine(QPointF(0, y), QPointF(self.width(), y))
+        p.setPen(QPen(QColor("#cccccc"), 1, Qt.DotLine))
+        yx = y - self.height() * BASELINE * V2_XHEIGHT
+        p.drawLine(QPointF(0, yx), QPointF(self.width(), yx))
+        self._draw(p)
+        p.end()
+
+    def to_cell(self):
+        """Ảnh RGBA đúng cỡ ô (SPRITE_W x SPRITE_H) hoặc None nếu chưa viết."""
+        if not self.strokes:
+            return None
+        img = QImage(self.cw, self.ch, QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        self._draw(p, 1 / _CellCrop.ZOOM)
+        p.end()
+        return _pil_from_qimage(img)
+
+
+class HandReviewDialog(QDialog):
+    """Xem lại từng chữ đã cắt từ phiếu mẫu trước khi lưu bộ chữ: kéo lại khung cắt, đổi độ tách nền,
+    bỏ chữ, viết lại chữ chưa đẹp bằng chuột / bút cảm ứng."""
+
+    def __init__(self, parent, extracted: dict):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QSlider, QStackedWidget
+        from . import handwriting as hw
+        self.hw = hw
+        self.ex = extracted
+        self.version = extracted.get("version", 2)
+        self.setWindowTitle("Xem lại các chữ đã cắt")
+        self.resize(980, 640)
+        self.state = {}                    # ký tự -> {"rect", "thr", "drop", "drawn"}
+        self.glyphs = {}
+        self.order = [c for c in hw.CHARS if c in extracted["cells"]]
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        self.info = QLabel(wordWrap=True)
+        left.addWidget(self.info)
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("Độ tách nền chung:"))
+        self.sl_all = QSlider(Qt.Horizontal, minimum=120, maximum=230, value=175)
+        self.sl_all.setToolTip("Kéo sang phải nếu nét bút bị đứt / mờ, sang trái nếu còn vết bẩn, đường kẻ")
+        trow.addWidget(self.sl_all, 1)
+        left.addLayout(trow)
+        self.list = QListWidget(viewMode=QListWidget.IconMode, movement=QListWidget.Static,
+                                resizeMode=QListWidget.Adjust, spacing=4)
+        self.list.setIconSize(QSize(54, 72))
+        self.list.setGridSize(QSize(70, 100))
+        for ch in self.order:
+            it = QListWidgetItem(hw.label(ch))
+            it.setData(Qt.UserRole, ch)
+            self.list.addItem(it)
+        left.addWidget(self.list, 1)
+        lay.addLayout(left, 3)
+        right = QVBoxLayout()
+        self.title = QLabel(objectName="title")
+        f = QFont()
+        f.setPointSize(13)
+        f.setBold(True)
+        self.title.setFont(f)
+        right.addWidget(self.title)
+        right.addWidget(QLabel("Kéo chuột trên ảnh để đặt lại khung cắt (phần tô tối bị bỏ).", wordWrap=True))
+        self.stack = QStackedWidget()
+        self.crop = _CellCrop()
+        self.pad = _CellPad()
+        self.stack.addWidget(self.crop)
+        self.stack.addWidget(self.pad)
+        row = QHBoxLayout()
+        row.addWidget(self.stack)
+        self.out = QLabel(alignment=Qt.AlignCenter)
+        self.out.setFixedSize(self.crop.size())
+        self.out.setToolTip("Kết quả sau khi cắt (nền ô vuông = trong suốt)")
+        row.addWidget(self.out)
+        right.addLayout(row)
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Tách nền chữ này:"))
+        self.sl_one = QSlider(Qt.Horizontal, minimum=120, maximum=230, value=175)
+        r2.addWidget(self.sl_one, 1)
+        right.addLayout(r2)
+        r3 = QHBoxLayout()
+        self.btn_reset = QPushButton("Đặt lại khung")
+        self.btn_drop = QPushButton("Bỏ chữ này", checkable=True)
+        self.btn_draw = QPushButton("Viết lại bằng chuột", checkable=True)
+        self.btn_clear = QPushButton("Xóa nét")
+        for b in (self.btn_reset, self.btn_drop, self.btn_draw, self.btn_clear):
+            r3.addWidget(b)
+        right.addLayout(r3)
+        self.hint = QLabel("", objectName="lbl", wordWrap=True)
+        right.addWidget(self.hint)
+        right.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Lưu bộ chữ")
+        bb.accepted.connect(self._accept)
+        bb.rejected.connect(self.reject)
+        right.addWidget(bb)
+        lay.addLayout(right, 2)
+        self.cur = None
+        self.list.currentItemChanged.connect(self._select)
+        self.crop.rectChanged.connect(self._rect_changed)
+        self.sl_one.valueChanged.connect(self._thr_changed)
+        self.sl_all.sliderReleased.connect(self._thr_all)
+        self.btn_reset.clicked.connect(self._reset)
+        self.btn_drop.toggled.connect(self._drop)
+        self.btn_draw.toggled.connect(self._draw_mode)
+        self.btn_clear.clicked.connect(self._clear_pad)
+        for ch in self.order:
+            self.state[ch] = {"rect": self.hw.default_rect(self.version), "thr": 175, "drop": False, "drawn": None}
+            self._process(ch)
+        self._update_info()
+        if self.order:
+            first = next((i for i, c in enumerate(self.order) if self.glyphs.get(c) is None), 0)
+            self.list.setCurrentRow(first)
+
+    # ----- xử lý
+    def _process(self, ch):
+        st = self.state[ch]
+        if st["drop"]:
+            g = None
+        elif st["drawn"] is not None:
+            g = st["drawn"]
+        else:
+            g = self.hw.process_cell(self.ex["cells"][ch], st["thr"], st["rect"], self.version)
+        self.glyphs[ch] = g
+        it = self.list.item(self.order.index(ch))
+        it.setIcon(QIcon(QPixmap.fromImage(self._thumb(g, QSize(54, 72)))))
+        miss = g is None
+        it.setForeground(QColor("#c62828") if miss else QColor(ui_color("text")))
+        it.setText(self.hw.label(ch) + (" – trống" if miss else ""))
+        return g
+
+    def _thumb(self, g, size: QSize) -> QImage:
+        img = QImage(size, QImage.Format_ARGB32)
+        img.fill(QColor("#ffffff"))
+        p = QPainter(img)
+        cell = 6 if size.width() < 100 else 12
+        for y in range(0, size.height(), cell):
+            for x in range(0, size.width(), cell):
+                if (x // cell + y // cell) % 2:
+                    p.fillRect(x, y, cell, cell, QColor("#eeeeee"))
+        if g is not None:
+            p.drawImage(img.rect(), pil_to_qimage(g))
+        else:
+            p.setPen(QColor("#c62828"))
+            p.drawText(img.rect(), Qt.AlignCenter, "trống")
+        p.end()
+        return img
+
+    def _show(self):
+        ch = self.cur
+        if ch is None:
+            return
+        st = self.state[ch]
+        self.crop.set_cell(self.ex["cells"][ch], st["rect"])
+        self.out.setPixmap(QPixmap.fromImage(self._thumb(self.glyphs.get(ch), self.out.size())))
+
+    def _update_info(self):
+        ok = sum(1 for c in self.order if self.glyphs.get(c) is not None)
+        miss = [self.hw.label(c) for c in self.order if self.glyphs.get(c) is None]
+        pages = self.ex.get("pages", [])
+        txt = f"Đã cắt được {ok}/{len(self.hw.CHARS)} chữ."
+        if self.version == 2 and 2 not in pages:
+            txt += " Chưa có trang 2 (chữ hoa, dấu câu): chữ hoa sẽ dùng tạm chữ thường."
+        if miss:
+            txt += " Ô trống: " + ", ".join(miss[:20]) + ("…" if len(miss) > 20 else "")
+        self.info.setText(txt + " Bấm vào từng chữ để kiểm tra.")
+
+    # ----- sự kiện
+    def _select(self, item, _prev=None):
+        if item is None:
+            return
+        if self.btn_draw.isChecked():
+            self.btn_draw.setChecked(False)
+        self.cur = item.data(Qt.UserRole)
+        st = self.state[self.cur]
+        self.title.setText(f"Chữ “{self.hw.label(self.cur)}”")
+        for w, v in ((self.sl_one, st["thr"]), (self.btn_drop, st["drop"])):
+            w.blockSignals(True)
+            (w.setValue if hasattr(w, "setValue") else w.setChecked)(v)
+            w.blockSignals(False)
+        self.hint.setText("Đã viết lại bằng chuột." if st["drawn"] is not None else "")
+        self._show()
+
+    def _changed(self):
+        self._process(self.cur)
+        self._show()
+        self._update_info()
+
+    def _rect_changed(self, r):
+        if self.cur is None:
+            return
+        self.state[self.cur]["rect"] = r
+        self.state[self.cur]["drawn"] = None
+        self._changed()
+
+    def _thr_changed(self, v):
+        if self.cur is None:
+            return
+        self.state[self.cur]["thr"] = v
+        self._changed()
+
+    def _thr_all(self):
+        v = self.sl_all.value()
+        for ch in self.order:
+            self.state[ch]["thr"] = v
+            self._process(ch)
+        self.sl_one.blockSignals(True)
+        self.sl_one.setValue(v)
+        self.sl_one.blockSignals(False)
+        self._show()
+        self._update_info()
+
+    def _reset(self):
+        if self.cur is None:
+            return
+        self.state[self.cur].update(rect=self.hw.default_rect(self.version), drawn=None, drop=False, thr=self.sl_all.value())
+        self._select(self.list.currentItem())
+        self._changed()
+
+    def _drop(self, on):
+        if self.cur is None:
+            return
+        self.state[self.cur]["drop"] = on
+        self._changed()
+
+    def _draw_mode(self, on):
+        if on:
+            self.pad.clear()
+            self.stack.setCurrentWidget(self.pad)
+            self.btn_draw.setText("Xong viết")
+            self.hint.setText("Viết chữ vào khung bên trái, chân chữ chạm đường đỏ, chữ thường cao tới đường chấm. "
+                              "Bấm “Xong viết” để dùng.")
+            return
+        self.stack.setCurrentWidget(self.crop)
+        self.btn_draw.setText("Viết lại bằng chuột")
+        if self.cur is not None:
+            g = self.pad.to_cell()
+            if g is not None:
+                self.state[self.cur]["drawn"] = g
+                self.state[self.cur]["drop"] = False
+                self.hint.setText("Đã viết lại bằng chuột.")
+                self._changed()
+
+    def _clear_pad(self):
+        if self.btn_draw.isChecked():
+            self.pad.clear()
+        elif self.cur is not None and self.state[self.cur]["drawn"] is not None:
+            self.state[self.cur]["drawn"] = None
+            self.hint.setText("")
+            self._changed()
+
+    def _accept(self):
+        if self.btn_draw.isChecked():
+            self.btn_draw.setChecked(False)
+        n = sum(1 for g in self.glyphs.values() if g is not None)
+        if n < 10:
+            QMessageBox.warning(self, APP_NAME, "Bộ chữ cần ít nhất 10 chữ có nét viết.")
+            return
+        self.accept()
+
+    def sprite(self) -> bytes:
+        return self.hw.build_sprite({c: g for c, g in self.glyphs.items() if g is not None})
