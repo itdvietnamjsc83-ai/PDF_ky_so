@@ -40,6 +40,10 @@ jobs:
         with: { name: PdfKySo-Setup, path: "dist/PdfKySo-Setup-*.exe", if-no-files-found: warn }
       - uses: actions/upload-artifact@v4
         with: { name: PdfKySo-Portable, path: "dist/PdfKySo-Portable-*.zip", if-no-files-found: warn }
+      - name: In nhật ký kiểm thử bị treo (khi lỗi)
+        if: failure()
+        shell: pwsh
+        run: if (Test-Path ketqua_treo.log) { Get-Content ketqua_treo.log -Encoding utf8 }
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: ketqua-kiemthu-loi, path: "ketqua_treo.log\ndist/ketqua_kiemthu.xml", if-no-files-found: ignore }
