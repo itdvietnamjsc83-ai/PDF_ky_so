@@ -1,4 +1,5 @@
 @echo off
+if "%PDFKYSO_LTO%"=="" set PDFKYSO_LTO=yes
 setlocal
 REM ===== Dong goi PdfKySo.exe (chay tren Windows 10/11 64-bit, Python 3.12) =====
 REM Quy trinh on dinh: 1) cai dung phien ban da khoa  2) chay toan bo kiem thu
@@ -40,7 +41,7 @@ python -m nuitka main.py ^
   --company-name="Cong ty co phan Cong nghe ITD Viet Nam" --product-name="PDF Ky So" ^
   --file-version=%PDFKYSO_VERSION% --product-version=%PDFKYSO_VERSION% ^
   --output-dir=dist --output-filename=PdfKySo.exe ^
-  --lto=yes --assume-yes-for-downloads || goto :fail
+  --lto=%PDFKYSO_LTO% --assume-yes-for-downloads || goto :fail
 
 REM Tu kiem tra ban da dong goi: thieu thu vien nao se bao loi ngay tai day
 dist\main.dist\PdfKySo.exe --selftest > dist\selftest.txt 2>&1
