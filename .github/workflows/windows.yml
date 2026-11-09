@@ -22,6 +22,7 @@ jobs:
       - name: Nạp khóa bản quyền & thông tin công ty thật (GitHub Secrets, nếu có)
         shell: pwsh
         env:
+          PDFKYSO_PUBLIC_KEY: ${{ secrets.PDFKYSO_PUBLIC_KEY }}
           PDFKYSO_LICENSE_KEY_PY: ${{ secrets.PDFKYSO_LICENSE_KEY_PY }}
           PDFKYSO_BRANDING_PY: ${{ secrets.PDFKYSO_BRANDING_PY }}
           PDFKYSO_SETUP_ISS: ${{ secrets.PDFKYSO_SETUP_ISS }}

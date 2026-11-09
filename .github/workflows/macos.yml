@@ -27,6 +27,7 @@ jobs:
         with: { python-version: "3.12" }
       - name: Nạp khóa bản quyền & thông tin công ty thật (GitHub Secrets, nếu có)
         env:
+          PDFKYSO_PUBLIC_KEY: ${{ secrets.PDFKYSO_PUBLIC_KEY }}
           PDFKYSO_LICENSE_KEY_PY: ${{ secrets.PDFKYSO_LICENSE_KEY_PY }}
           PDFKYSO_BRANDING_PY: ${{ secrets.PDFKYSO_BRANDING_PY }}
         run: python tools/ci_secrets.py
