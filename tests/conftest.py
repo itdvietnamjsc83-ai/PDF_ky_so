@@ -143,6 +143,13 @@ def _demo_license_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_email(monkeypatch):
+    """Không gọi MAPI thật khi kiểm thử: máy Windows không có Outlook (máy chủ GitHub) có thể treo chờ mãi."""
+    import app.tools as _tools
+    monkeypatch.setattr(_tools, "_mapi_send", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_tray_save_dialog(monkeypatch):
     """1.0.22: bấm Ghép hiện hộp thoại Lưu – kiểm thử thì nhận luôn đường dẫn gợi ý (không mở hộp thoại thật -> treo)."""
     try:
