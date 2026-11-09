@@ -13,7 +13,6 @@ Nếu macOS báo "không thể mở vì không xác minh được nhà phát tri
 
 Các quyền macOS có thể hỏi (bấm Cho phép / OK):
   - "PDF Ký Số muốn điều khiển Microsoft Word / Excel / PowerPoint": để chuyển tài liệu Office sang PDF.
-  - "PDF Ký Số muốn điều khiển Mail": để tạo thư đã đính kèm file khi bấm Gửi email.
   Lỡ bấm "Không cho phép": Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Tự động hóa → bật lại.
 
 In ra PDF Ký Số từ mọi ứng dụng (thay cho máy in ảo trên Windows):

@@ -165,17 +165,6 @@ def test_office_module_uses_mac_path(monkeypatch, tmp_path):
     assert used == "Microsoft Word" and called == {"kind": "word", "excel": None}
 
 
-def test_mac_email_script_escapes(monkeypatch):
-    seen = []
-    monkeypatch.setattr(macintegration, "_default_mail_app", lambda: "com.apple.mail")
-    monkeypatch.setattr(macintegration.subprocess, "run",
-                        lambda args, **k: seen.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
-    assert macintegration.send_email('/tmp/a "b".pdf', 'Hợp đồng "A"', "x\\y") == "mail"
-    script = seen[0][2]
-    assert 'tell application "Mail"' in script
-    assert '\\"b\\"' in script and 'Hợp đồng \\"A\\"' in script and "x\\\\y" in script
-
-
 def test_fix_shortcut_texts(monkeypatch, qapp):  # noqa: F811
     from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
     monkeypatch.setattr(osutil, "IS_MAC", True)

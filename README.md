@@ -168,8 +168,6 @@ sắc nét, file tăng rất ít (phông chữ chỉ nhúng các ký tự dùng 
 - **Lịch sử phiên bản:** mỗi lần lưu đè tự cất bản trước (20 bản gần nhất); mở xem hoặc khôi phục.
 - **Sao lưu & chuyển máy:** thư viện dấu (vẫn mã hóa), nhật ký, mẫu, cài đặt vào 1 file .zip; khôi phục trên máy mới.
 - **Thư mục tự xử lý:** thả file vào thư mục -> tự đóng dấu chữ / nén / bảo vệ, kết quả ở thư mục con "da_xu_ly".
-- **Gửi email:** mở thư mới của Outlook/Thunderbird đã đính kèm file; máy không có phần mềm email thì mở thư mục chứa
-  file để kéo vào Gmail/Zalo.
 - Chưa làm (cần máy chủ/dịch vụ ngoài hoặc để bản sau): ký từ xa qua điện thoại, nhận dạng chữ (OCR).
 
 ## Giai đoạn 6c – bìa & mục lục khi ghép
@@ -396,6 +394,8 @@ Khi đặt ảnh, con dấu, chữ ký ảnh, nét chữ tay của mình lên tr
 
 ## Bản 1.0.22 (16 góp ý của anh Dũng)
 
+- Đã bỏ tính năng **Gửi email** (nút trên thanh Trang chủ, MAPI/Mail) theo yêu cầu.
+
 - **Xoay ảnh / dấu / chữ ký đã chèn:** núm xoay tròn trên khung, ô "Xoay" ở bảng bên phải; bấm lại ảnh đã chèn vẫn xoay
   tiếp được (giữ nguyên cỡ, không méo).
 - **Bố cục thu gọn (nút "Bố cục"):** ẩn/hiện cột ảnh thu nhỏ, thanh công cụ trái, thanh lệnh, bảng phải (chứng thư số,
@@ -529,7 +529,6 @@ Cùng một mã nguồn cho Windows và Mac; phần riêng của Mac nằm ở `
 |---|---|
 | Máy in ảo "PDF Ky so" / "PDF Khay ghep" | Nút **PDF ▾** trong hộp thoại In của mọi ứng dụng → "Mở bằng PDF Ký Số" / "Thêm vào Khay ghép PDF Ký Số" (tự tạo ở `~/Library/PDF Services` khi mở phần mềm) |
 | Word/Excel/PowerPoint qua COM | Microsoft Office cho Mac qua AppleScript (hỏi quyền "Tự động hóa" lần đầu), dự phòng LibreOffice |
-| Gửi email qua MAPI | Thư mới trong Mail (hoặc Outlook nếu là ứng dụng email mặc định) |
 | Mã máy: MachineGuid | UUID phần cứng + số sê-ri máy (không đổi khi cài lại macOS) |
 | Trạng thái dùng thử: Registry | `~/Library/Preferences/.vn.pdfkyso.state` |
 | Dữ liệu `%APPDATA%\PdfKySo` | `~/Library/Application Support/PdfKySo`, nhật ký `~/Library/Logs/PdfKySo` |
@@ -613,7 +612,7 @@ app/ui_edit.py       công cụ vẽ, hộp chữ, sửa chữ, tìm & thay, ch�
 assets/fonts/        5 phông viết tay miễn phí (SIL OFL) đã rút gọn; assets/fonts/ui: phông giao diện Be Vietnam Pro
 app/theme.py         bảng màu "Ấn triện" sáng/tối, stylesheet, nạp phông giao diện
 app/protect.py       lưu có bảo vệ, lớp in mờ, quyền, gỡ bảo vệ
-app/tools.py         nén, so sánh, dấu chữ, Excel, lịch sử phiên bản, sao lưu, email
+app/tools.py         nén, so sánh, dấu chữ, Excel, lịch sử phiên bản, sao lưu
 app/autofolder.py    thư mục tự xử lý
 app/ui_tools.py      hộp thoại giai đoạn 6
 app/license.py       mã máy, kiểm tra mã kích hoạt, dùng thử 15 ngày
@@ -628,7 +627,7 @@ build_keygen.bat     đóng gói bộ tạo key thành PdfKySo-KeyGen.exe
 installer/setup.iss  bộ cài Inno Setup (tiếng Việt)
 installer/           script tạo/gỡ máy in ảo
 app/osutil.py        thư mục dữ liệu, mở file, phím tắt theo hệ điều hành (Windows / macOS)
-app/macintegration.py macOS: Office cho Mac (AppleScript), Mail, mục PDF ▾ trong hộp thoại In
+app/macintegration.py macOS: Office cho Mac (AppleScript), mục PDF ▾ trong hộp thoại In
 build_mac.sh         đóng gói bản macOS: .app + .dmg (+ .pkg), ký mã, công chứng
 installer/mac/       Info.plist, entitlements, biểu tượng .icns, bộ cài .pkg, hướng dẫn cài cho khách
 tests/               kiểm thử tự động (lõi + giao diện + hiệu năng)

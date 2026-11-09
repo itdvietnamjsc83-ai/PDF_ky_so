@@ -1,5 +1,5 @@
 """Giai đoạn 6 – công cụ: nén theo dung lượng, so sánh 2 bản, dấu chữ (ĐÃ DUYỆT, BẢN SAO…),
-tạo hàng loạt từ Excel, lịch sử phiên bản, sao lưu & chuyển máy, gửi email."""
+tạo hàng loạt từ Excel, lịch sử phiên bản, sao lưu & chuyển máy."""
 from __future__ import annotations
 
 import difflib
@@ -511,52 +511,3 @@ def restore(src_zip: str) -> dict:
             with open(target, "wb") as f:
                 f.write(z.read(info))
     return settings
-
-
-# ================================================================== gửi email
-def send_email(path: str, subject: str = "", body: str = "") -> str:
-    """Mở thư mới của phần mềm email mặc định (Outlook, Thunderbird…) đã đính kèm file.
-    Windows: qua MAPI (chuẩn của Windows). Không có phần mềm email: mở thư mục chứa file để kéo thả
-    vào Gmail/Zalo. Trả về cách đã dùng: "mapi" | "folder"."""
-    import sys
-    if sys.platform == "win32":
-        try:
-            _mapi_send(path, subject, body)
-            return "mapi"
-        except Exception:
-            pass
-        import subprocess
-        subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
-        return "folder"
-    if sys.platform == "darwin":                     # Mail / Outlook cho Mac qua AppleScript
-        from .macintegration import send_email as _mac_send
-        return _mac_send(path, subject, body)
-    return "folder"
-
-
-def _mapi_send(path: str, subject: str, body: str):
-    import ctypes
-    from ctypes import wintypes as wt
-
-    class MapiFileDescW(ctypes.Structure):
-        _fields_ = [("ulReserved", wt.ULONG), ("flFlags", wt.ULONG), ("nPosition", wt.ULONG),
-                    ("lpszPathName", wt.LPWSTR), ("lpszFileName", wt.LPWSTR), ("lpFileType", ctypes.c_void_p)]
-
-    class MapiMessageW(ctypes.Structure):
-        _fields_ = [("ulReserved", wt.ULONG), ("lpszSubject", wt.LPWSTR), ("lpszNoteText", wt.LPWSTR),
-                    ("lpszMessageType", wt.LPWSTR), ("lpszDateReceived", wt.LPWSTR),
-                    ("lpszConversationID", wt.LPWSTR), ("flFlags", wt.ULONG), ("lpOriginator", ctypes.c_void_p),
-                    ("nRecipCount", wt.ULONG), ("lpRecips", ctypes.c_void_p), ("nFileCount", wt.ULONG),
-                    ("lpFiles", ctypes.POINTER(MapiFileDescW))]
-
-    mapi = ctypes.WinDLL("mapi32.dll")
-    send = mapi.MAPISendMailW
-    send.restype = wt.ULONG
-    send.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(MapiMessageW), wt.ULONG, wt.ULONG]
-    fd = MapiFileDescW(0, 0, 0xFFFFFFFF, os.path.abspath(path), os.path.basename(path), None)
-    msg = MapiMessageW(0, subject or os.path.basename(path), body or "", None, None, None, 0, None, 0, None, 1,
-                       ctypes.pointer(fd))
-    MAPI_LOGON_UI, MAPI_DIALOG = 0x1, 0x8
-    rc = send(None, None, ctypes.byref(msg), MAPI_LOGON_UI | MAPI_DIALOG, 0)
-    if rc not in (0, 1):                       # 1 = người dùng hủy
-        raise OSError(f"MAPI lỗi {rc}")

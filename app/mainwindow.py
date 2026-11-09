@@ -24,8 +24,7 @@ MODES = [
     ("home", "Trang chủ", [
         [("open", "Mở", "open", 0), ("save", "Lưu", "save", 0), ("print", "In", "print", 0)],
         [("undo", "Hoàn tác", "undo", 0), ("redo", "Làm lại", "redo", 0)],
-        [("tray", "Khay ghép", "merge", 0), ("image", "Chèn ảnh", "image", 0), ("protect", "Lưu có bảo vệ", "lock", 0),
-         ("mail", "Gửi email", "mail", 0)]]),
+        [("tray", "Khay ghép", "merge", 0), ("image", "Chèn ảnh", "image", 0), ("protect", "Lưu có bảo vệ", "lock", 0)]]),
     ("edit", "Chỉnh sửa", [
         [("select", "Chọn", "select", 0), ("edittext", "Sửa chữ", "text", 0), ("textbox", "Hộp chữ", "textbox", 0),
          ("hand", "Chữ viết tay", "hand", 0), ("image", "Ảnh", "image", 0)],
@@ -71,7 +70,7 @@ READY = {"open", "save", "print", "undo", "redo", "blank", "delete", "rotate", "
          "stamp", "sigimg", "seam", "digisign", "verify",
          "edittext", "textbox", "hand", "note", "symbol", "shape", "pen", "erase", "find",
          "protect", "password", "printperm", "presets", "batchsign", "flow", "compare", "stamptext", "compress",
-         "batchxl", "autofolder", "history", "backup", "mail", "toc", "license", "about", "clearhistory",
+         "batchxl", "autofolder", "history", "backup", "toc", "license", "about", "clearhistory",
          "select", "notes", "colormode", "importopts"}
 # dùng được cả khi hết hạn dùng thử / chưa kích hoạt (chỉ xem, in, kiểm tra chữ ký)
 FREE_CMDS = {"open", "print", "verify", "license", "about", "history", "undo", "redo", "clearhistory", "select",
@@ -1888,9 +1887,6 @@ class MainWindow(QMainWindow):
             return
         elif cmd == "history":
             self.history_dialog(tab)
-            return
-        elif cmd == "mail":
-            self.mail_doc(tab)
             return
         elif cmd == "digisign":
             self.digital_sign(tab)
@@ -4540,16 +4536,6 @@ class MainWindow(QMainWindow):
                                     on_error=lambda s, e: self._flash(f"Lỗi tự xử lý {os.path.basename(s)}: {e}"))
         self._auto_timer = QTimer(self, interval=3000, timeout=self.auto_watcher.scan)
         self._auto_timer.start()
-
-    def mail_doc(self, tab):
-        from .tools import send_email
-        if not tab.doc.path or tab.doc.modified:
-            if QMessageBox.question(self, APP_NAME, "Cần lưu tài liệu trước khi gửi. Lưu ngay?") != QMessageBox.Yes \
-                    or not self.save(tab):
-                return
-        how = send_email(tab.doc.path, os.path.splitext(tab.doc.name)[0])
-        self._flash("Đã mở thư mới có đính kèm file." if how in ("mapi", "mail") else
-                    "Máy chưa có phần mềm email: đã mở thư mục chứa file để bạn kéo vào Gmail/Zalo.")
 
     # ---------- giai đoạn 4: ký số bằng USB token ----------
     def _ready_to_sign(self, tab: "DocTab") -> bool:

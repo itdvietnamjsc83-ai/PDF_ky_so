@@ -169,10 +169,15 @@ if [ "$BUILD_PKG" = "1" ]; then
   PKGROOT="build/pkgroot"
   [ -e "$PKGROOT" ] && mv "$PKGROOT" "build/pkgroot-old-$(date +%s)"
   mkdir -p "$PKGROOT"
-  ditto "$APP" "$PKGROOT/$APP_NAME.app"
+  # pkgbuild (mkbom) lỗi với tên thư mục có dấu ("parent directory ... does not exist"):
+  # đóng gói dưới tên không dấu PdfKySo.app, postinstall đổi lại thành "PDF Ký Số.app".
+  ditto "$APP" "$PKGROOT/PdfKySo.app"
   chmod +x installer/mac/pkg/scripts/postinstall
-  pkgbuild --root "$PKGROOT" --install-location /Applications --identifier "$BUNDLE_ID.pkg" \
-    --version "$VERSION" --scripts installer/mac/pkg/scripts build/component.pkg
+  pkgbuild --analyze --root "$PKGROOT" build/component.plist
+  plutil -replace 0.BundleIsRelocatable -bool NO build/component.plist
+  plutil -replace 0.BundleOverwriteAction -string upgrade build/component.plist
+  pkgbuild --root "$PKGROOT" --component-plist build/component.plist --install-location /Applications \
+    --identifier "$BUNDLE_ID.pkg" --version "$VERSION" --scripts installer/mac/pkg/scripts build/component.pkg
   sed "s/@VERSION@/$VERSION/g; s/@ARCH@/$ARCH/g" installer/mac/pkg/distribution.xml > build/distribution.xml
   PKG="dist/$BASE.pkg"
   [ -e "$PKG" ] && mv "$PKG" "build/$(basename "$PKG").old-$(date +%s)"

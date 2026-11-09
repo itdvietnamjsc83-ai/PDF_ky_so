@@ -3,7 +3,6 @@
 - Word / Excel / PowerPoint cho Mac -> PDF bằng AppleScript (giữ nguyên khổ giấy như khi in).
   Office trên Mac chạy trong "hộp cát" (sandbox): file được chép vào thư mục nhóm của Office
   (~/Library/Group Containers/UBF8T346G9.Office) để Office đọc / ghi được mà không hỏi quyền từng file.
-- Gửi email: tạo thư mới trong ứng dụng Mail (hoặc Outlook) đã đính kèm file.
 - "Máy in ảo" kiểu Mac: mục PDF Services trong hộp thoại In của mọi ứng dụng (nút PDF ▾):
     "Mở bằng PDF Ký Số"  và  "Thêm vào Khay ghép PDF Ký Số".
 - Đổi chữ "Ctrl+" thành "⌘" trên giao diện.
@@ -140,50 +139,6 @@ def find_libreoffice() -> str | None:
     return None
 
 
-# ------------------------------------------------------------------ email
-def send_email(path: str, subject: str = "", body: str = "") -> str:
-    """Thư mới trong Mail (hoặc Outlook nếu là ứng dụng email chính) đã đính kèm file."""
-    def esc(t):
-        return (t or "").replace("\\", "\\\\").replace('"', '\\"')
-    outlook = os.path.isdir("/Applications/Microsoft Outlook.app") and _default_mail_app() == "com.microsoft.outlook"
-    if outlook:
-        script = f'''tell application "Microsoft Outlook"
-  set m to make new outgoing message with properties {{subject:"{esc(subject)}", plain text content:"{esc(body)}"}}
-  make new attachment at m with properties {{file:(POSIX file "{esc(path)}")}}
-  open m
-  activate
-end tell'''
-    else:
-        script = f'''tell application "Mail"
-  set m to make new outgoing message with properties {{subject:"{esc(subject)}", content:"{esc(body)}" & return & return, visible:true}}
-  tell content of m to make new attachment with properties {{file name:(POSIX file "{esc(path)}")}} at after last paragraph
-  activate
-end tell'''
-    try:
-        r = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True, errors="replace", timeout=30)
-        if r.returncode == 0:
-            return "mail"
-    except Exception:
-        pass
-    subprocess.Popen(["open", "-R", path])
-    return "folder"
-
-
-def _default_mail_app() -> str:
-    try:
-        r = subprocess.run(["/usr/bin/defaults", "read", "com.apple.LaunchServices/com.apple.launchservices.secure",
-                            "LSHandlers"], capture_output=True, text=True, timeout=5)
-        txt = r.stdout
-        k = txt.find("mailto")
-        if k >= 0:
-            seg = txt[max(0, k - 200):k + 200].lower()
-            if "com.microsoft.outlook" in seg:
-                return "com.microsoft.outlook"
-    except Exception:
-        pass
-    return "com.apple.mail"
-
-
 # ------------------------------------------------------------------ PDF Services (máy in ảo kiểu Mac)
 SERVICES = {"sign": "Mở bằng PDF Ký Số", "tray": "Thêm vào Khay ghép PDF Ký Số"}
 
@@ -263,5 +218,5 @@ def fix_shortcut_texts(root):
             continue
 
 
-__all__ = ["office_to_pdf", "send_email", "install_pdf_services", "remove_pdf_services", "fix_shortcut_texts",
+__all__ = ["office_to_pdf", "install_pdf_services", "remove_pdf_services", "fix_shortcut_texts",
            "find_libreoffice", "selftest"]

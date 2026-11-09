@@ -271,12 +271,12 @@ def test_autofolder_gui(win, qapp, tmp_path, monkeypatch):
     assert (folder / "da_xu_ly" / "a.pdf").exists()
 
 
-def test_unsupported_and_mail(win, qapp, tmp_path, monkeypatch):
+def test_unsupported(win, qapp, tmp_path, monkeypatch):
     shown = []
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
     _open(win, qapp, _contract(1), tmp_path)
     win.run("remote")
     win.run("ocr")
     assert "chưa hỗ trợ" in shown[0] and "cập nhật sau" in shown[1]
-    win.run("mail")
-    assert "thư" in win.lbl_msg.text().lower()
+    from app.mainwindow import MODES
+    assert all(c[0] != "mail" for _, _, gs in MODES for g in gs for c in g if isinstance(c, tuple))  # đã bỏ Gửi email

@@ -243,8 +243,6 @@ def test_toolbar_every_button_responds(win, qapp, samples, monkeypatch):
     monkeypatch.setattr(pagetools.ResizeDialog, "exec", lambda self: QDialog.Rejected)
     monkeypatch.setattr("app.mainwindow.MainWindow.print_doc", lambda *a: None)
     monkeypatch.setattr("app.mainwindow.MainWindow.library_menu", lambda *a: None)
-    # Gửi email: Windows gọi MAPI (Outlook…) – máy chủ kiểm thử có thể treo chờ hộp thoại của trình mail
-    monkeypatch.setattr("app.tools.send_email", lambda *a, **k: "test")
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.Ok)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Ok)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
