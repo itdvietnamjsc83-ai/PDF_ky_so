@@ -1,5 +1,5 @@
 # Đóng gói bản macOS trên máy Mac thật của GitHub (không cần tự có máy Mac):
-#   macos-14 = Apple M (arm64), macos-15-intel = Intel (x86_64).
+#   macos-15 = Apple M (arm64), macos-15-intel = Intel (x86_64).
 # Ký & công chứng: thêm các "Secrets" trong Settings → Secrets and variables → Actions của kho mã:
 #   MAC_CERT_P12_BASE64   chứng thư "Developer ID Application" (+ "Developer ID Installer") xuất ra .p12, mã hóa base64
 #   MAC_CERT_PASSWORD     mật khẩu file .p12
@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, arch: arm64 }
+          - { runner: macos-15, arch: arm64 }
           - { runner: macos-15-intel, arch: x86_64 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
