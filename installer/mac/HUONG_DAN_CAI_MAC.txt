@@ -1,0 +1,28 @@
+PDF KÝ SỐ CHO macOS – HƯỚNG DẪN CÀI ĐẶT
+
+1. Kéo biểu tượng "PDF Ký Số" thả vào thư mục "Applications" (Ứng dụng) ngay trong cửa sổ này.
+2. Mở Launchpad (hoặc Finder → Ứng dụng) → bấm "PDF Ký Số".
+3. Lần đầu: chọn "Dùng thử 15 ngày" hoặc nhập mã kích hoạt (gửi mã máy cho nhà cung cấp).
+4. Đẩy ổ đĩa "PDF Ký Số" ra (biểu tượng ⏏ trong Finder). Không chạy phần mềm trực tiếp từ cửa sổ cài đặt này.
+
+Yêu cầu: macOS 11 (Big Sur) trở lên. Có 2 bản: "arm64" cho máy Apple M1/M2/M3/M4…, "x86_64" cho máy Mac Intel.
+(Xem loại máy: menu Apple (biểu tượng quả táo) → Giới thiệu về máy Mac → dòng "Chip" hoặc "Bộ xử lý".)
+
+Nếu macOS báo "không thể mở vì không xác minh được nhà phát triển":
+  Cài đặt hệ thống → Quyền riêng tư & Bảo mật → kéo xuống → bấm "Vẫn mở" bên cạnh dòng PDF Ký Số.
+
+Các quyền macOS có thể hỏi (bấm Cho phép / OK):
+  - "PDF Ký Số muốn điều khiển Microsoft Word / Excel / PowerPoint": để chuyển tài liệu Office sang PDF.
+  - "PDF Ký Số muốn điều khiển Mail": để tạo thư đã đính kèm file khi bấm Gửi email.
+  Lỡ bấm "Không cho phép": Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Tự động hóa → bật lại.
+
+In ra PDF Ký Số từ mọi ứng dụng (thay cho máy in ảo trên Windows):
+  Trong hộp thoại In, bấm nút "PDF ▾" ở góc dưới → "Mở bằng PDF Ký Số" hoặc "Thêm vào Khay ghép PDF Ký Số".
+  (Hai mục này được tạo tự động khi mở phần mềm lần đầu.)
+
+Ký số bằng USB token: cài driver token bản dành cho macOS của hãng (VNPT-CA, Viettel-CA, BKAV-CA, FPT-CA,
+SafeNet…). Phần mềm tự tìm thư viện PKCS#11 của hãng; nếu không thấy, chọn thủ công file .dylib trong
+hộp thoại Ký số → "Thêm driver…".
+
+Gỡ cài đặt: kéo "PDF Ký Số" từ thư mục Ứng dụng vào Thùng rác. Dữ liệu (thư viện dấu, cài đặt) nằm ở
+~/Library/Application Support/PdfKySo – xóa thư mục này nếu muốn xóa sạch.

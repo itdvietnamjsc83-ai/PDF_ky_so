@@ -1,0 +1,34 @@
+# Phien ban CO DINH dung nhu da kiem thu -> ban dong goi luon giong ban da test.
+# Nang cap: doi so phien ban, chay lai toan bo kiem thu (run_tests.bat) roi moi dong goi.
+PySide6-Essentials==6.11.2   # giao dien Qt (LGPL)
+pypdfium2==5.7.1             # PDFium cua Google Chrome (Apache-2.0/BSD-3)
+pikepdf==10.5.1              # qpdf (MPL-2.0): toi uu khi luu, ma hoa AES-256
+Pillow==12.2.0               # xu ly anh con dau (MIT-CMU), chi nap khi dung
+fonttools==4.62.1            # rut gon phong chu khi nhung vao PDF (MIT)
+openpyxl==3.1.5              # tuy chon sheet/vua trang Excel khi chuyen bang LibreOffice (MIT)
+et-xmlfile==2.0.0
+
+# ---- ky so (giai doan 4), chi nap khi bam Ky so / Kiem tra chu ky
+pyHanko==0.37.0              # PAdES (MIT)
+pyhanko-certvalidator==0.32.1
+python-pkcs11==0.10.0        # noi chuyen voi driver PKCS#11 cua moi hang USB token (MIT)
+cryptography==50.0.1         # (Apache-2.0/BSD)
+asn1crypto==1.5.1
+tzlocal==5.4.4
+tzdata==2026.4               # du lieu mui gio cho Windows
+lxml==6.1.0
+aiohttp==3.14.3              # goi may chu dau thoi gian (TSA), LTV
+aiohappyeyeballs==2.7.1
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+multidict==6.9.1
+propcache==0.5.4
+yarl==1.25.1
+idna==3.13
+oscrypto==1.3.0
+uritools==6.1.3
+certifi==2026.4.22
+cffi==2.0.0
+pycparser==3.0
+typing_extensions==4.15.0

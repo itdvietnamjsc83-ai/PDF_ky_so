@@ -1,0 +1,14 @@
+﻿PDF KÝ SỐ – BẢN PORTABLE (KHÔNG CẦN CÀI ĐẶT)
+
+Cách dùng:
+  1. Giải nén cả thư mục vào ổ cứng hoặc USB (không chạy trực tiếp trong file .zip).
+  2. Bấm đúp PdfKySo.exe.
+  3. Lần đầu: chọn "Dùng thử 15 ngày" hoặc nhập mã kích hoạt (gửi mã máy cho nhà cung cấp).
+
+Lưu ý:
+  - Không xóa file "PdfKySo.portable" (thiếu file này phần mềm sẽ đòi cài đặt).
+  - Thư viện dấu, cài đặt, bản quyền lưu trong thư mục "Data" bên cạnh – sao lưu thư mục này là đủ.
+  - Mã kích hoạt gắn với từng máy tính: mang sang máy khác cần kích hoạt theo mã máy của máy đó.
+  - Bản portable không có máy in ảo "PDF Ky so" / "PDF Khay ghep" và mục "Mở bằng" cho file PDF.
+    Cần các tính năng này thì dùng bản cài đặt PdfKySo-Setup.exe.
+  - Ký số bằng USB token: vẫn cần cài phần mềm (driver) của hãng token trên máy đó như bình thường.

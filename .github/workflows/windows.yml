@@ -1,0 +1,41 @@
+# Kiểm thử + đóng gói tự động trên máy Windows thật của GitHub mỗi lần đẩy mã.
+# Khóa bản quyền / thương hiệu / bộ cài thật: GitHub Secrets (xem tools/ci_secrets.py) – KHÔNG để trong kho mã.
+# Kho mã không chứa bộ tạo key (tools/keygen.py) – chỉ đóng gói phần mềm chính.
+name: windows-build
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Tạo chứng thư thử nghiệm trong kho Windows (KSP RSA, KSP ECDSA, CSP đời cũ)
+        shell: pwsh
+        run: |
+          $common = @{ CertStoreLocation = "Cert:\CurrentUser\My"; KeyUsage = "DigitalSignature", "NonRepudiation"; NotAfter = (Get-Date).AddDays(30) }
+          New-SelfSignedCertificate @common -Subject "CN=PdfKySo CI KSP" -KeyAlgorithm RSA -KeyLength 2048 -Provider "Microsoft Software Key Storage Provider" | Out-Null
+          New-SelfSignedCertificate @common -Subject "CN=PdfKySo CI ECDSA" -KeyAlgorithm ECDSA_nistP256 -Provider "Microsoft Software Key Storage Provider" | Out-Null
+          New-SelfSignedCertificate @common -Subject "CN=PdfKySo CI CSP" -KeyAlgorithm RSA -KeyLength 2048 -KeySpec Signature -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" | Out-Null
+          Get-ChildItem Cert:\CurrentUser\My | Format-Table Subject, Thumbprint
+      - name: Nạp khóa bản quyền & thông tin công ty thật (GitHub Secrets, nếu có)
+        shell: pwsh
+        env:
+          PDFKYSO_LICENSE_KEY_PY: ${{ secrets.PDFKYSO_LICENSE_KEY_PY }}
+          PDFKYSO_BRANDING_PY: ${{ secrets.PDFKYSO_BRANDING_PY }}
+          PDFKYSO_SETUP_ISS: ${{ secrets.PDFKYSO_SETUP_ISS }}
+        run: python tools/ci_secrets.py
+      - name: Cài Inno Setup (tạo bộ cài)
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Kiểm thử + đóng gói + tự kiểm tra .exe
+        shell: cmd
+        env: { QT_QPA_PLATFORM: offscreen, PDFKYSO_WIN_CERT_TEST: "1" }
+        run: build_windows.bat
+      - uses: actions/upload-artifact@v4
+        with: { name: PdfKySo-windows, path: dist/main.dist }
+      - uses: actions/upload-artifact@v4
+        with: { name: PdfKySo-Setup, path: "dist/PdfKySo-Setup-*.exe", if-no-files-found: warn }
+      - uses: actions/upload-artifact@v4
+        with: { name: PdfKySo-Portable, path: "dist/PdfKySo-Portable-*.zip", if-no-files-found: warn }

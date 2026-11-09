@@ -1,0 +1,62 @@
+# Đóng gói bản macOS trên máy Mac thật của GitHub (không cần tự có máy Mac):
+#   macos-14 = Apple M (arm64), macos-13 = Intel (x86_64).
+# Ký & công chứng: thêm các "Secrets" trong Settings → Secrets and variables → Actions của kho mã:
+#   MAC_CERT_P12_BASE64   chứng thư "Developer ID Application" (+ "Developer ID Installer") xuất ra .p12, mã hóa base64
+#   MAC_CERT_PASSWORD     mật khẩu file .p12
+#   MAC_SIGN_ID           vd. Developer ID Application: Ten Cong Ty (TEAMID)
+#   MAC_INSTALLER_ID      vd. Developer ID Installer: Ten Cong Ty (TEAMID)
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   (mật khẩu dành riêng cho ứng dụng, tạo ở appleid.apple.com)
+# Không có Secrets -> vẫn build được bản ký tạm để thử (chưa gửi khách được).
+# Lưu ý: file app/license_key.py trong kho mã phải là khóa công khai THẬT (đã chạy tools/keygen.py init);
+# khóa bí mật / cụm mật khẩu tuyệt đối không đưa lên GitHub.
+name: macos-build
+on: [workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, arch: arm64 }
+          - { runner: macos-13, arch: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Nạp chứng thư ký mã vào keychain tạm (nếu có)
+        env:
+          P12: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          P12_PASS: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "Không có chứng thư – build bản ký tạm."; exit 0; fi
+          KC="$RUNNER_TEMP/build.keychain-db"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p ci "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASS" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+      - name: Lưu thông tin công chứng (nếu có)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_ID" ]; then
+            xcrun notarytool store-credentials pdfkyso-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+            echo "MAC_NOTARY_PROFILE=pdfkyso-notary" >> "$GITHUB_ENV"
+          fi
+      - name: Kiểm thử + đóng gói + tự kiểm tra .app + tạo .dmg/.pkg
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ARCH: ${{ matrix.arch }}
+          PYTHON: python
+          BUILD_PKG: "1"
+          MAC_SIGN_ID: ${{ secrets.MAC_SIGN_ID }}
+          MAC_INSTALLER_ID: ${{ secrets.MAC_INSTALLER_ID }}
+        run: ./build_mac.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: "PdfKySo-mac-${{ matrix.arch }}", path: "dist/*.dmg\ndist/*.pkg", if-no-files-found: error }

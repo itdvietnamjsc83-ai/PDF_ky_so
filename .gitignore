@@ -1,0 +1,19 @@
+*.pyc
+.pytest_cache/
+.venv-mac/
+.venv/
+__pycache__/
+build/
+dist/
+dist_keygen/
+ketqua_*
+tools/DuLieuCapKey/
+tools/key_da_cap/
+tools/nhat_ky_cap_key.csv
+# chỉ ở máy nhà phát triển – KHÔNG đưa lên GitHub
+tools/keygen.py
+build_keygen.bat
+build_keygen_mac.sh
+DuLieuCapKey/
+*.lic
+PdfKySo-KeyGen*

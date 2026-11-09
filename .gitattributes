@@ -1,0 +1,3 @@
+# file .bat của Windows phải giữ xuống dòng CRLF
+*.bat -text
+*.iss -text

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.1.1
+PyMuPDF==1.28.2   # chi dung de tao file PDF mau khi kiem thu, KHONG dong goi vao phan mem
+nuitka==4.2.2     # bien dich ra .exe (nho, chay nhanh, kho dich nguoc)

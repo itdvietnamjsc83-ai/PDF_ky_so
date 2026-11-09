@@ -1,0 +1,12 @@
+#!/bin/bash
+# Chạy sau khi bộ cài .pkg chép "PDF Ký Số.app" vào /Applications (quyền root).
+# Mở phần mềm dưới tài khoản người dùng đang đăng nhập với --activate (màn hình Dùng thử / Kích hoạt),
+# giống bộ cài Windows. Lần mở đầu tiên phần mềm tự tạo 2 mục trong nút "PDF ▾" của hộp thoại In.
+APP="/Applications/PDF Ký Số.app"
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+USER_NAME=$(stat -f%Su /dev/console 2>/dev/null)
+if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ] && [ "$COMMAND_LINE_INSTALL" != "1" ]; then
+  USER_ID=$(id -u "$USER_NAME")
+  launchctl asuser "$USER_ID" sudo -u "$USER_NAME" open -b vn.pdfkyso.app --args --activate >/dev/null 2>&1 || true
+fi
+exit 0
