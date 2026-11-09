@@ -2,11 +2,11 @@
 Hiện ở: màn hình Giới thiệu, màn hình kích hoạt (để khách liên hệ mua key), thuộc tính file .exe."""
 
 PRODUCT = "PDF Ký Số"
-DEVELOPER = "[Tên nhà phát triển / công ty]"
-PHONE = "[Số điện thoại / Zalo]"
-EMAIL = "[email hỗ trợ]"
-WEBSITE = "[website]"
-ADDRESS = ""
+DEVELOPER = "Công ty cổ phần Công nghệ ITD Việt Nam"
+PHONE = "0988095867"
+EMAIL = "vanthu.itdvn@gmail.com"
+WEBSITE = "itdvietnam.com.vn"
+ADDRESS = "Số 1 Ngõ 30 đường Lý Sơn, Hà Nội"
 PRICE_NOTE = "Liên hệ để được cấp mã kích hoạt theo mã máy (1 năm / vĩnh viễn)."
 COPYRIGHT = "© 2026 " + DEVELOPER
 

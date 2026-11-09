@@ -37,7 +37,7 @@ python -m nuitka main.py ^
   --nofollow-import-to=pymupdf,fitz,pytest,numpy,tkinter,PIL.ImageQt,uharfbuzz,qrcode,barcode,signxml,xsdata ^
   --windows-console-mode=disable ^
   --windows-icon-from-ico=assets\app.ico ^
-  --company-name="[Ten nha phat trien]" --product-name="PDF Ky So" ^
+  --company-name="Cong ty co phan Cong nghe ITD Viet Nam" --product-name="PDF Ky So" ^
   --file-version=%PDFKYSO_VERSION% --product-version=%PDFKYSO_VERSION% ^
   --output-dir=dist --output-filename=PdfKySo.exe ^
   --lto=yes --assume-yes-for-downloads || goto :fail
