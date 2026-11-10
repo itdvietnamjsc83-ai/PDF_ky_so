@@ -159,3 +159,85 @@ def test_page_number_badge_on_thumbnails(tray, qapp, tmp_path):
     img.fill(0xffffffff)
     out = page_badge(img, 12)
     assert out.pixelColor(8, 8).blue() > 150 and out.pixelColor(8, 8).red() < 60   # nhãn số trang góc trên-trái
+
+
+def _show(tray, qapp, r):
+    tray.table.selectRow(r)
+    pump(qapp, 200)
+    return tray.preview
+
+
+def test_cut_segment_at_page_and_undo_redo(tray, qapp, tmp_path):
+    a, b = files(tmp_path, [6, 2])
+    tray.add_paths([a, b])
+    p = _show(tray, qapp, 0)
+    p.picker.setCurrentRow(3)
+    p.picker.item(3).setSelected(True)
+    p.btn_cut.click()                                               # (1) cắt tại trang 4
+    assert [(it.name, it.ranges) for it in tray.items[:2]] == [(tray.items[0].name, "1-3"), (tray.items[0].name, "4-6")]
+    assert len(tray.items) == 3 and tray._picker_row == 1
+    assert tray.undo() and len(tray.items) == 2 and tray.items[0].whole     # (9) Ctrl+Z
+    assert tray.redo() and len(tray.items) == 3 and tray.items[1].ranges == "4-6"
+    tray.move_rows([1], 3)
+    tray._persist()
+    assert tray.undo() and tray.items[1].ranges == "4-6"
+
+
+def test_live_range_typing_updates_preview_and_flags_errors(tray, qapp, tmp_path):
+    (a,) = files(tmp_path, [6])
+    tray.add_paths([a])
+    tray._set(tray.items[0], whole=False)
+    p = _show(tray, qapp, 0)
+    ed = tray.table.cellWidget(0, 5)
+    ed.setText("1-2, 5")
+    ed.textEdited.emit("1-2, 5")                                    # (3) đang gõ: ảnh tích theo ngay
+    assert p.kept() == [0, 1, 4] and "border" not in ed.styleSheet()
+    ed.setText("1-9")
+    ed.textEdited.emit("1-9")
+    assert "e53935" in ed.styleSheet() and "chưa đúng" in tray.lbl_total.text()
+
+
+def test_page_edits_rotate_blank_paper_go_into_merge(tray, qapp, tmp_path):
+    from app.merge import merge
+    (a,) = files(tmp_path, [3])
+    tray.add_paths([a])
+    tray.cb_duplex.setChecked(False)
+    tray.cb_rotate.setChecked(False)
+    p = _show(tray, qapp, 0)
+    p.rotate_selected(90, [0])                                      # (5) xoay, chèn trang trắng, đổi khổ
+    p.add_blank_selected(1, [1])
+    p.set_paper_selected("A3", [2])
+    it = tray.items[0]
+    assert it.page_rot == {"0": 90} and it.page_blank == {"1": 1} and it.page_paper == {"2": "A3"}
+    assert "xoay 90°" in p.picker.item(0).text() and "+1 trắng" in p.picker.item(1).text()
+    assert "4 trang" in tray.lbl_total.text() and tray.table.item(0, 6).text() == "1 – 4"
+    d = merge(tray.items, tray.opts)
+    assert d.page_count == 4
+    assert d.page(0).get_rotation() == 90
+    assert d.text(2).strip() == ""                                  # trang trắng sau trang 2
+    w, h = d.page_size_pt(3)
+    assert abs(max(w, h) - 1190.55) < 3                             # A3
+    assert tray.undo() and tray.items[0].page_paper == {}
+
+
+def test_file_colors_and_merge_warnings(tray, qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from app.merge import check_plan
+    a, b = files(tmp_path, [4, 2])
+    tray.add_paths([a, b])
+    tray.table.selectRow(0)
+    tray.duplicate_selected()
+    c = [tray.file_color(it) for it in tray.items]
+    assert c[0] == c[1] != c[2]                                     # (7) cùng file cùng màu
+    assert tray.table.item(0, 1).background().color().name() == c[0]
+    p = _show(tray, qapp, 0)
+    assert p.file_tint == c[0]
+    tray.items[0].whole, tray.items[0].ranges = False, "1-3"
+    tray.items[1].whole, tray.items[1].ranges = False, "3-4"
+    w = check_plan(tray.items, tray.opts)                           # (8) trang 3 dùng 2 lần
+    assert any("lặp lại" in x and "trang 3" in x for x in w)
+    asked = []
+    tray.quiet = False
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    assert tray.do_merge(False) is None and asked and "lặp lại" in asked[0]
+    tray.quiet = True

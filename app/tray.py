@@ -67,6 +67,18 @@ class TrayDialog(QDialog):
                 self.btn_dup = b
                 b.setToolTip("1 file dùng ở nhiều đoạn: nhân bản thành 2, 3… dòng ngay bên dưới, mỗi dòng chọn trang "
                              "riêng rồi kéo tới đúng chỗ (Ctrl+D)")
+        # 1.0.22: hoàn tác / làm lại mọi thao tác trong khay (thêm, xóa, nhân bản, cắt đoạn, chọn trang, xoay…)
+        self.btn_undo = QPushButton(icon("undo", colors["text"]), "Hoàn tác")
+        self.btn_undo.setToolTip("Hoàn tác thao tác vừa làm trong khay (Ctrl+Z)")
+        self.btn_undo.clicked.connect(self.undo)
+        self.btn_redo = QPushButton(icon("redo", colors["text"]), "Làm lại")
+        self.btn_redo.setToolTip("Làm lại (Ctrl+Y)")
+        self.btn_redo.clicked.connect(self.redo)
+        top.addWidget(self.btn_undo)
+        top.addWidget(self.btn_redo)
+        self._undo_stack: list = []
+        self._redo_stack: list = []
+        self._last_state = None
         top.addStretch()
         b = QPushButton("Mở mẫu khay…")
         b.clicked.connect(self.open_template)
@@ -142,6 +154,9 @@ class TrayDialog(QDialog):
         self.table.customContextMenuRequested.connect(self._table_menu)
         from PySide6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Ctrl+D"), self.table, self.duplicate_selected)
+        QShortcut(QKeySequence.Undo, self, self.undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, self.redo)
+        QShortcut(QKeySequence.Redo, self, self.redo)
         # 5b: kéo thả dòng để sắp thứ tự; thả file / thư mục vào đúng vị trí trong bảng
         self.table.setDragEnabled(True)
         self.table.setAcceptDrops(True)
@@ -154,6 +169,7 @@ class TrayDialog(QDialog):
         self.preview = TrayPreview(self)
         self.preview.changed.connect(lambda: self._picker_changed(None))
         self.preview.colorsChanged.connect(self._page_colors_changed)
+        self.preview.cutRequested.connect(self.cut_at)
         # tên cũ (giữ tương thích): khung chọn trang = bảng xem trước
         self.picker_box = self.preview
         self.picker = self.preview.picker
@@ -242,6 +258,8 @@ class TrayDialog(QDialog):
 
         self._restore()
         self.refresh()
+        self._last_state = (self._key(self.items), self._state())
+        self._update_undo_buttons()
 
     # ---------- dữ liệu ----------
     def _office_colors(self, paths: list[str]) -> dict | None:
@@ -491,7 +509,6 @@ class TrayDialog(QDialog):
 
     def duplicate_selected(self) -> int:
         """Nhân bản các file đang chọn (cùng file gốc, chọn trang riêng) – bản sao nằm ngay dưới bản gốc."""
-        from dataclasses import replace
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
         if not rows and 0 <= self._picker_row < len(self.items):
             rows = [self._picker_row]
@@ -502,7 +519,7 @@ class TrayDialog(QDialog):
         for r in rows:
             r += shift
             src = self.items[r]
-            self.items.insert(r + 1, replace(src, page_colors=dict(src.page_colors)))
+            self.items.insert(r + 1, src.copy())
             new_rows.append(r + 1)
             shift += 1
         self.refresh()
@@ -639,7 +656,14 @@ class TrayDialog(QDialog):
             l.addWidget(cb)
             self.table.setCellWidget(r, 0, w)
             self._text(r, 1, str(r + 1))
+            tint = QColor(self.file_color(it))
+            c1 = self.table.item(r, 1)
+            c1.setBackground(tint)
+            c1.setForeground(QColor("#ffffff"))
+            c1.setTextAlignment(Qt.AlignCenter)
+            c1.setToolTip("Màu riêng của file này – trang của file trong ô xem trước có viền cùng màu")
             self._text(r, 2, it.name, tip=it.path)
+            self.table.item(r, 2).setForeground(tint.darker(115))
             self._text(r, 3, str(it.page_count))
             mode = QComboBox()
             mode.addItems(["Cả file", "Chọn trang"])
@@ -650,14 +674,16 @@ class TrayDialog(QDialog):
             rng.setEnabled(not it.whole)
             rng.setPlaceholderText("vd: 1-3, 5, 8-")
             rng.editingFinished.connect(lambda e=rng, it=it: self._set(it, ranges=e.text()))
+            rng.textEdited.connect(lambda txt, e=rng, it=it: self._live_range(it, e, txt))
             self.table.setCellWidget(r, 5, rng)
             pr = info.get(id(it))
             if not it.checked:
                 self._text(r, 6, "Không ghép")
                 self._text(r, 7, "–")
             elif pr:
-                self._text(r, 6, f"{pr.start} – {pr.start + len(pr.pages) - 1}")
-                self._text(r, 7, f"+{pr.blanks_after} (trang {pr.start + len(pr.pages)})" if pr.blanks_after else "0")
+                n_out = pr.item.out_len()
+                self._text(r, 6, f"{pr.start} – {pr.start + n_out - 1}")
+                self._text(r, 7, f"+{pr.blanks_after} (trang {pr.start + n_out})" if pr.blanks_after else "0")
             else:
                 self._text(r, 6, "Không có trang")
                 self._text(r, 7, "–")
@@ -699,6 +725,20 @@ class TrayDialog(QDialog):
             self.lbl_sub.setText(f"{sheets(total, self.opts.duplex)} tờ khi in {'2 mặt' if self.opts.duplex else '1 mặt'}"
                                  " · định dạng trang " + ("giữ nguyên như gốc" if not self.opts.resize
                                                           else f"đổi về {self.opts.resize}"))
+
+    def _live_range(self, it, ed, txt: str):
+        """Đang gõ dải trang: ảnh xem trước tích / bỏ theo ngay, gõ sai (vượt số trang…) thì ô báo đỏ."""
+        try:
+            pages = parse_ranges(txt, it.page_count) if txt.strip() else []
+            err = ""
+        except ValueError as e:
+            pages, err = None, str(e)
+        ed.setStyleSheet("QLineEdit{border:1px solid #e53935;background:#fdecea;color:#b71c1c}" if err else "")
+        ed.setToolTip(err or f"{len(pages)} trang: {format_ranges(pages) if pages else 'không trang nào'}")
+        if err:
+            self.lbl_total.setText(f"Dải trang chưa đúng: {err}")
+        elif hasattr(self, "preview") and self.preview.item is it:
+            self.preview.set_kept(pages, emit=False)
 
     def _text(self, r, c, text, tip=None):
         from PySide6.QtWidgets import QTableWidgetItem
@@ -744,6 +784,7 @@ class TrayDialog(QDialog):
         it = self.items[r]
         self._picker_row = r
         self.preview.default_color = self.opts.color
+        self.preview.file_tint = self.file_color(it)
         self.preview.load(it, self._out_start(it))
 
     def _picker_changed(self, _item):
@@ -780,13 +821,17 @@ class TrayDialog(QDialog):
 
     def do_merge(self, for_sign: bool):
         self._read_options()
-        signed = [os.path.basename(it.path) for it in self.items if it.checked
-                  and _has_signature(it.path)]
-        if signed and not getattr(self, "quiet", False) and QMessageBox.question(
-                self, "Khay ghép – file đã có chữ ký số",
-                "Các file sau có chữ ký số, file ghép sẽ KHÔNG còn chữ ký của chúng:\n" +
-                "\n".join(f"• {n}" for n in signed[:12]) + "\n\nVẫn ghép?") != QMessageBox.Yes:
-            return None
+        if not getattr(self, "quiet", False):
+            from .merge import check_plan
+            try:
+                warns = check_plan(self.items, self.opts)
+            except Exception:
+                warns = []
+            if warns and QMessageBox.question(
+                    self, "Khay ghép – xem lại trước khi ghép",
+                    "Trước khi ghép, nên xem lại:\n\n" + "\n\n".join(f"• {w}" for w in warns) + "\n\nVẫn ghép?") \
+                    != QMessageBox.Yes:
+                return None
         self._chosen_path = None
         if self.cb_ask_save.isChecked() and not getattr(self, "quiet", False):
             chosen = self._ask_target()
@@ -928,7 +973,113 @@ class TrayDialog(QDialog):
         return None
 
     # ---------- lưu trạng thái / mẫu ----------
+    # ---------- hoàn tác trong khay ----------
+    def _state(self) -> list:
+        return [it.copy() for it in self.items]
+
+    @staticmethod
+    def _key(items) -> str:
+        return json.dumps([it.to_json() for it in items], ensure_ascii=False, sort_keys=True)
+
+    def _track(self):
+        """Gọi sau mỗi thay đổi (qua _persist): có khác trạng thái trước -> cất trạng thái trước để Ctrl+Z."""
+        if getattr(self, "_restoring", False) or not hasattr(self, "_undo_stack"):
+            return
+        cur = self._key(self.items)
+        if self._last_state is not None and self._last_state[0] != cur:
+            self._undo_stack.append(self._last_state[1])
+            del self._undo_stack[:-100]
+            self._redo_stack.clear()
+        self._last_state = (cur, self._state())
+        self._update_undo_buttons()
+
+    def _update_undo_buttons(self):
+        if hasattr(self, "btn_undo"):
+            self.btn_undo.setEnabled(bool(self._undo_stack))
+            self.btn_redo.setEnabled(bool(self._redo_stack))
+
+    def _apply_state(self, items):
+        self._restoring = True
+        try:
+            row = self._picker_row
+            self.items = [it.copy() for it in items]
+            self.refresh()
+            if 0 <= row < len(self.items):
+                self.table.selectRow(row)
+                self._load_picker(row)
+            else:
+                self._picker_row = -1
+                self.preview.clear()
+            self._persist()
+        finally:
+            self._restoring = False
+        self._last_state = (self._key(self.items), self._state())
+        self._update_undo_buttons()
+
+    def undo(self) -> bool:
+        if not self._undo_stack:
+            return False
+        self._redo_stack.append(self._state())
+        self._apply_state(self._undo_stack.pop())
+        self.lbl_saved.setText("Đã hoàn tác. Ctrl+Y để làm lại.")
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo_stack:
+            return False
+        self._undo_stack.append(self._state())
+        self._apply_state(self._redo_stack.pop())
+        self.lbl_saved.setText("Đã làm lại.")
+        return True
+
+    # ---------- cắt đoạn ----------
+    def cut_at(self, page: int) -> bool:
+        """Cắt đoạn của file đang xem tại trang `page` (0-based): dòng hiện tại giữ các trang trước,
+        dòng mới ngay bên dưới giữ từ trang đó trở đi -> kéo dòng mới tới chỗ cần xen file khác."""
+        r = self._picker_row
+        if not (0 <= r < len(self.items)):
+            return False
+        it = self.items[r]
+        pages = it.pages()
+        if page not in pages:
+            later = [k for k, p in enumerate(pages) if p > page]
+            idx = later[0] if later else len(pages)
+        else:
+            idx = pages.index(page)
+        first, second = pages[:idx], pages[idx:]
+        if not first or not second:
+            QMessageBox.information(self, "Khay ghép", "Chọn một trang ở giữa đoạn (không phải trang đầu / sau trang "
+                                                       "cuối) để cắt thành 2 đoạn.")
+            return False
+        tail = it.copy()
+        it.whole, it.ranges = False, format_ranges(first)
+        tail.whole, tail.ranges = False, format_ranges(second)
+        self.items.insert(r + 1, tail)
+        self.refresh()
+        self.table.selectRow(r + 1)
+        self._load_picker(r + 1)
+        self._persist()
+        self.lbl_saved.setText(f"Đã cắt {it.name} thành 2 đoạn: trang {format_ranges(first)} và "
+                               f"{format_ranges(second)}. Kéo đoạn sau tới đúng chỗ. Ctrl+Z để hoàn tác.")
+        self.btn_open_dir.setVisible(False)
+        return True
+
+    # ---------- màu riêng từng file ----------
+    FILE_TINTS = ["#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00897b", "#e53935", "#6d4c41", "#3949ab",
+                  "#c0ca33", "#d81b60"]
+
+    def file_color(self, it) -> str:
+        """Mỗi file một màu (bản nhân bản / đoạn cắt của cùng file cùng màu)."""
+        order = []
+        for x in self.items:
+            k = os.path.normcase(os.path.abspath(x.path))
+            if k not in order:
+                order.append(k)
+        k = os.path.normcase(os.path.abspath(it.path))
+        return self.FILE_TINTS[(order.index(k) if k in order else 0) % len(self.FILE_TINTS)]
+
     def _persist(self):
+        self._track()
         if self.settings is not None:
             import time as _t
             from dataclasses import asdict

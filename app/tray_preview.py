@@ -63,6 +63,37 @@ def page_badge(img: QImage, n: int, dpr: float = 1.0) -> QImage:
     return out
 
 
+def tint_frame(img: QImage, color: str, dpr: float = 1.0) -> QImage:
+    """Viền màu riêng của file quanh ảnh trang – nhìn là biết trang thuộc file nào."""
+    out = img.convertToFormat(QImage.Format_ARGB32)
+    p = QPainter(out)
+    from PySide6.QtGui import QPen
+    w = max(2.0, 3 * dpr)
+    p.setPen(QPen(QColor(color), w))
+    p.drawRect(int(w / 2), int(w / 2), out.width() - int(w), out.height() - int(w))
+    p.end()
+    return out
+
+
+def blank_badge(img: QImage, n: int, dpr: float = 1.0) -> QImage:
+    """Nhãn "+n trang trắng" ở góc dưới-phải ảnh trang."""
+    out = img.convertToFormat(QImage.Format_ARGB32)
+    p = QPainter(out)
+    f = QFont()
+    f.setBold(True)
+    f.setPixelSize(int(max(10, min(16, out.width() / dpr / 10)) * dpr))
+    p.setFont(f)
+    text = f"+{n} trắng"
+    fm = p.fontMetrics()
+    w, h = fm.horizontalAdvance(text) + int(10 * dpr), fm.height() + int(2 * dpr)
+    m = int(5 * dpr)
+    p.fillRect(out.width() - w - m, out.height() - h - m, w, h, QColor(255, 143, 0, 230))
+    p.setPen(QColor("#ffffff"))
+    p.drawText(out.width() - w - m, out.height() - h - m, w, h, Qt.AlignCenter, text)
+    p.end()
+    return out
+
+
 def color_badge(img: QImage, text: str) -> QImage:
     """Nhãn nhỏ góc trên-phải ảnh trang: chế độ màu riêng của trang (Xám / ĐT / Chữ đen)."""
     out = img.convertToFormat(QImage.Format_ARGB32)
@@ -84,7 +115,8 @@ class TrayPreview(QFrame):
     """Bảng xem trước bên phải khay ghép. Phát `changed` khi người dùng đổi trang giữ/bỏ,
     `colorsChanged` khi đổi màu riêng từng trang (Màu / Chữ đen / Xám / Đen trắng)."""
     changed = Signal()
-    colorsChanged = Signal()
+    colorsChanged = Signal()                      # đổi màu / xoay / trang trắng / khổ riêng từng trang
+    cutRequested = Signal(int)                    # cắt đoạn tại trang (0-based)
 
     def __init__(self, parent=None):
         super().__init__(parent, objectName="card")
@@ -97,6 +129,7 @@ class TrayPreview(QFrame):
         self._doc = None
         self._conv: dict = {}                     # chế độ -> PdfDocument đã chuyển màu (xem trước đúng như khi ghép)
         self.default_color = "color"
+        self.file_tint = ""                       # màu riêng của file (viền ảnh trang)
         self._ref_px = 794.0                      # bề rộng trang đầu ở 100% (96 dpi) – để hiện phần trăm
         v = QVBoxLayout(self)
         v.setContentsMargins(12, 10, 12, 10)
@@ -130,6 +163,33 @@ class TrayPreview(QFrame):
             self.color_buttons[key] = b
         crow.addStretch()
         v.addLayout(crow)
+        # 1.0.22: sửa trang ngay trong khay (không đụng file gốc) + cắt đoạn
+        erow = QHBoxLayout()
+        erow.setSpacing(4)
+        erow.addWidget(QLabel("Sửa trang:", objectName="lbl"))
+        self.btn_rotl = QToolButton(text="⟲ Xoay trái", toolTip="Xoay trái 90° các trang đang chọn")
+        self.btn_rotl.clicked.connect(lambda: self.rotate_selected(-90))
+        self.btn_rotr = QToolButton(text="⟳ Xoay phải", toolTip="Xoay phải 90° các trang đang chọn")
+        self.btn_rotr.clicked.connect(lambda: self.rotate_selected(90))
+        self.btn_blank = QToolButton(text="+ Trang trắng", toolTip="Chèn 1 trang trắng ngay sau trang đang chọn "
+                                                                   "(bấm lại để thêm; chuột phải để bỏ)")
+        self.btn_blank.clicked.connect(lambda: self.add_blank_selected(1))
+        self.btn_paper = QToolButton(text="Khổ ▾", toolTip="Đổi khổ riêng các trang đang chọn")
+        self.btn_paper.setPopupMode(QToolButton.InstantPopup)
+        pm = QMenu(self.btn_paper)
+        for name in ("A4", "A3", "A5", "Letter", "Legal"):
+            pm.addAction(name, lambda n=name: self.set_paper_selected(n))
+        pm.addSeparator()
+        pm.addAction("Giữ khổ gốc", lambda: self.set_paper_selected(None))
+        self.btn_paper.setMenu(pm)
+        self.btn_cut = QToolButton(text="✂ Cắt đoạn tại đây",
+                                   toolTip="Tách file này thành 2 đoạn ngay trước trang đang chọn – để xen file khác "
+                                           "vào giữa (Ctrl+Z hoàn tác)")
+        self.btn_cut.clicked.connect(self._cut_clicked)
+        for b in (self.btn_rotl, self.btn_rotr, self.btn_blank, self.btn_paper, self.btn_cut):
+            erow.addWidget(b)
+        erow.addStretch()
+        v.addLayout(erow)
         zrow = QHBoxLayout()
         zrow.setSpacing(6)
         self.btn_fit = QToolButton(text="Vừa khung", checkable=True)
@@ -238,6 +298,17 @@ class TrayPreview(QFrame):
     def _label(self, i: int, keep: bool, pos: dict | None = None) -> str:
         """pos: {trang: thứ tự trong các trang giữ} – để ghi "→ trang x trong file ghép"."""
         t = f"Trang {i + 1}"
+        it = self.item
+        if it is not None:
+            extra = []
+            if int(it.page_rot.get(str(i), 0) or 0):
+                extra.append(f"xoay {it.page_rot[str(i)]}°")
+            if it.page_paper.get(str(i)):
+                extra.append(it.page_paper[str(i)])
+            if it.extra_after(i):
+                extra.append(f"+{it.extra_after(i)} trắng sau")
+            if extra:
+                t += " · " + " · ".join(extra)
         m = self.mode_of(i)
         if m != "color":
             from .colormode import MODE_SHORT
@@ -250,7 +321,10 @@ class TrayPreview(QFrame):
 
     def _relabel(self):
         kept = self.kept()
-        pos = {p: k for k, p in enumerate(kept)}
+        pos, off = {}, 0                          # chỗ trong file ghép (tính cả trang trắng chèn thêm)
+        for k, p in enumerate(kept):
+            pos[p] = k + off
+            off += self.item.extra_after(p) if self.item is not None else 0
         self.picker.blockSignals(True)
         for i in range(self.picker.count()):
             li = self.picker.item(i)
@@ -263,13 +337,16 @@ class TrayPreview(QFrame):
     def _update_status(self):
         if self.item is None:
             return
-        k = len(self.kept())
+        kept = self.kept()
+        k = len(kept)
+        span = k + sum(self.item.extra_after(p) for p in kept)
         n = self.item.page_count
         self.info.setText(f"{n} trang · giữ {k} · bỏ {n - k}" +
-                          (f" · trong file ghép: trang {self.out_start} – {self.out_start + k - 1}"
+                          (f" · trong file ghép: trang {self.out_start} – {self.out_start + span - 1}"
                            if self.out_start is not None and k else ""))
         self.status.setText("Tích / bỏ tích để giữ / bỏ trang · Space: đổi các trang đang chọn · "
                             "Màu trang: chọn trang rồi bấm Màu / Chữ đen / Xám / Như máy in / Đen trắng · "
+                            "Sửa trang: xoay, chèn trang trắng, đổi khổ, ✂ cắt đoạn (không đụng file gốc) · "
                             "Nháy đúp hoặc Enter: xem lớn · Chuột phải: thêm lựa chọn")
 
     # ---------- vẽ ảnh trang (dần dần, không đơ giao diện) ----------
@@ -431,11 +508,22 @@ class TrayPreview(QFrame):
         if m != "color":
             from .colormode import MODE_SHORT
             img = color_badge(img, MODE_SHORT[m])
+        it = self.item
+        deg = int(it.page_rot.get(str(i), 0) or 0) if it is not None else 0
+        if deg:
+            from PySide6.QtGui import QTransform
+            img = img.transformed(QTransform().rotate(deg), Qt.SmoothTransformation)
+        if it is not None and it.page_paper.get(str(i)):
+            img = color_badge(img, it.page_paper[str(i)])
         if li.checkState() != Qt.Checked:
             img = dropped_overlay(img)
         dpr = self.picker.devicePixelRatioF()
         sc = img.scaledToWidth(max(1, int(self.icon_w() * dpr)), Qt.SmoothTransformation)
         sc = page_badge(sc, i + 1, dpr)          # số trang gốc in ngay trên ảnh trang
+        if self.file_tint:                       # viền màu riêng của file
+            sc = tint_frame(sc, self.file_tint, dpr)
+        if it is not None and it.extra_after(i):
+            sc = blank_badge(sc, it.extra_after(i), dpr)
         pm = QPixmap.fromImage(sc)
         pm.setDevicePixelRatio(dpr)
         self.picker.blockSignals(True)
@@ -464,7 +552,7 @@ class TrayPreview(QFrame):
         # chia đều bề ngang cho các cột -> các trang nằm giữa, không dồn về góc trái
         vw = max(1, self.picker.viewport().width() - 4)
         cols = max(1, vw // (w + 24))
-        self.picker.setGridSize(QSize(max(w + 24, vw // cols), h + 50))   # 2 dòng chữ: số trang + chỗ trong file ghép
+        self.picker.setGridSize(QSize(max(w + 24, vw // cols), h + 58))   # 2 dòng chữ: số trang + chỗ trong file ghép
         self.lbl_zoom.setText(f"{self.zoom_percent()}%")
         self.sp_zoom.blockSignals(True)
         self.sp_zoom.setValue(self.zoom_percent())
@@ -513,14 +601,71 @@ class TrayPreview(QFrame):
         self.changed.emit()
         self._relabel()
 
-    def set_kept(self, pages):
+    def set_kept(self, pages, emit: bool = True):
         keep = set(pages)
         self.picker.blockSignals(True)
         for i in range(self.picker.count()):
             self.picker.item(i).setCheckState(Qt.Checked if i in keep else Qt.Unchecked)
         self.picker.blockSignals(False)
-        self.changed.emit()
+        if emit:
+            self.changed.emit()
         self._relabel()
+
+    # ---------- sửa trang trong khay ----------
+    def selected_pages(self) -> list[int]:
+        rows = sorted({self.picker.row(x) for x in self.picker.selectedItems()})
+        if not rows and self.picker.currentRow() >= 0:
+            rows = [self.picker.currentRow()]
+        return rows
+
+    def rotate_selected(self, deg: int, rows=None):
+        it = self.item
+        rows = self.selected_pages() if rows is None else rows
+        if it is None or not rows:
+            return
+        for r in rows:
+            a = (int(it.page_rot.get(str(r), 0) or 0) + deg) % 360
+            if a:
+                it.page_rot[str(r)] = a
+            else:
+                it.page_rot.pop(str(r), None)
+        self._edited(rows)
+
+    def add_blank_selected(self, n: int = 1, rows=None):
+        it = self.item
+        rows = self.selected_pages() if rows is None else rows
+        if it is None or not rows:
+            return
+        for r in rows:
+            k = max(0, it.extra_after(r) + n)
+            if k:
+                it.page_blank[str(r)] = k
+            else:
+                it.page_blank.pop(str(r), None)
+        self._edited(rows)
+
+    def set_paper_selected(self, paper, rows=None):
+        it = self.item
+        rows = self.selected_pages() if rows is None else rows
+        if it is None or not rows:
+            return
+        for r in rows:
+            if paper:
+                it.page_paper[str(r)] = paper
+            else:
+                it.page_paper.pop(str(r), None)
+        self._edited(rows)
+
+    def _edited(self, rows):
+        for r in rows:
+            self._set_icon(r)
+        self._relabel()
+        self.colorsChanged.emit()
+
+    def _cut_clicked(self):
+        rows = self.selected_pages()
+        if rows:
+            self.cutRequested.emit(rows[0])
 
     def quick(self, key: str):
         if self.item is None:
@@ -556,6 +701,17 @@ class TrayPreview(QFrame):
             sub = m.addMenu(f"Màu cho {len(rows)} trang đang chọn")
             for key, text in MODES:
                 sub.addAction(text, lambda k=key: self.set_page_colors(rows, k))
+            m.addSeparator()
+            m.addAction("⟲ Xoay trái 90°", lambda: self.rotate_selected(-90, rows))
+            m.addAction("⟳ Xoay phải 90°", lambda: self.rotate_selected(90, rows))
+            m.addAction("+ Chèn trang trắng sau", lambda: self.add_blank_selected(1, rows))
+            if self.item is not None and any(self.item.extra_after(r) for r in rows):
+                m.addAction("− Bỏ trang trắng đã chèn", lambda: self.add_blank_selected(-99, rows))
+            sub = m.addMenu("Đổi khổ trang")
+            for name in ("A4", "A3", "A5", "Letter", "Legal"):
+                sub.addAction(name, lambda n=name: self.set_paper_selected(n, rows))
+            sub.addAction("Giữ khổ gốc", lambda: self.set_paper_selected(None, rows))
+            m.addAction(f"✂ Cắt đoạn tại trang {rows[0] + 1}", lambda: self.cutRequested.emit(rows[0]))
             m.addSeparator()
         if li:
             m.addAction(f"Xem lớn trang {self.picker.row(li) + 1}…", lambda: self.open_large(self.picker.row(li)))

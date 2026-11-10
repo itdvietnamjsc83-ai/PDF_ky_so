@@ -61,6 +61,26 @@ class TrayItem:
     password: str | None = field(default=None, repr=False)
     color: str = ""              # đợt 3: "" = theo lựa chọn chung · "color" | "blacktext" | "gray" | "bw" cho riêng file này
     page_colors: dict = field(default_factory=dict)   # {"số trang (0-based)": "color"|"gray"|"bw"} – riêng từng trang
+    # 1.0.22 – sửa trang ngay trong khay (không đụng file gốc): {"số trang (0-based)": ...}
+    page_rot: dict = field(default_factory=dict)       # xoay thêm 90 / 180 / 270 độ
+    page_blank: dict = field(default_factory=dict)     # số trang trắng chèn SAU trang này
+    page_paper: dict = field(default_factory=dict)     # đổi khổ riêng trang này: "A4" | "A3" | "A5" | "Letter"…
+
+    def extra_after(self, page: int) -> int:
+        try:
+            return max(0, int(self.page_blank.get(str(page), 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    def out_len(self) -> int:
+        """Số trang đoạn này chiếm trong file ghép (trang được chọn + trang trắng chèn thêm)."""
+        pages = self.pages()
+        return len(pages) + sum(self.extra_after(p) for p in pages)
+
+    def copy(self) -> "TrayItem":
+        from dataclasses import replace
+        return replace(self, page_colors=dict(self.page_colors), page_rot=dict(self.page_rot),
+                       page_blank=dict(self.page_blank), page_paper=dict(self.page_paper))
 
     def mode_of(self, page: int, default: str = "color") -> str:
         """Chế độ màu của một trang: riêng trang > riêng file > lựa chọn chung."""
@@ -141,7 +161,7 @@ def plan(items: list[TrayItem], opts: MergeOptions) -> tuple[list[PlanRow], int,
         if not pages:
             continue
         start = pos + 1
-        pos += len(pages)
+        pos += len(pages) + sum(it.extra_after(p) for p in pages)
         need = 0
         is_last = k == len(active) - 1
         if opts.duplex and not is_last and pos % 2 == 1:
@@ -157,6 +177,51 @@ def plan(items: list[TrayItem], opts: MergeOptions) -> tuple[list[PlanRow], int,
     return rows, pos, blanks
 
 
+def check_plan(items: list[TrayItem], opts: MergeOptions) -> list[str]:
+    """1.0.22 – các điều nên xem lại trước khi ghép: trang dùng trùng, file đã ký số, trang khác khổ."""
+    from .document import paper_name
+    out = []
+    rows, _, _ = plan(items, opts)
+    used: dict = {}
+    for row in rows:
+        for p in row.pages:
+            used.setdefault((os.path.normcase(os.path.abspath(row.item.path)), p), []).append(row)
+    dup: dict = {}
+    for (path, p), rs in used.items():
+        if len(rs) > 1:
+            dup.setdefault(rs[0].item.name, []).append(p + 1)
+    for name, pgs in dup.items():
+        pgs.sort()
+        out.append(f"Trang dùng lặp lại: {name} – trang {format_ranges([x - 1 for x in pgs])} có ở nhiều đoạn.")
+    signed = []
+    for row in rows:
+        try:
+            from .tray import _has_signature
+            if _has_signature(row.item.path) and row.item.name not in signed:
+                signed.append(row.item.name)
+        except Exception:
+            pass
+    if signed:
+        out.append("File đã có chữ ký số (file ghép sẽ không còn chữ ký của chúng): " + ", ".join(signed[:6]) +
+                   (" …" if len(signed) > 6 else ""))
+    if not opts.resize:
+        sizes: dict = {}
+        for row in rows:
+            pdf = pdfium.PdfDocument(row.item.path, password=row.item.password)
+            try:
+                for p in row.pages:
+                    w, h = pdf.get_page_size(p)
+                    lab = row.item.page_paper.get(str(p)) or paper_name(w * 25.4 / 72, h * 25.4 / 72)
+                    sizes[lab] = sizes.get(lab, 0) + 1
+            finally:
+                pdf.close()
+        if len(sizes) > 1:
+            out.append("Các trang khác khổ: " + ", ".join(f"{k} ({v} trang)" for k, v in
+                                                           sorted(sizes.items(), key=lambda kv: -kv[1])) +
+                       ". Có thể chọn “Kích thước trang” để đưa về một khổ.")
+    return out
+
+
 def sheets(total_pages: int, duplex: bool) -> int:
     return (total_pages + 1) // 2 if duplex else total_pages
 
@@ -169,21 +234,44 @@ def merge(items: list[TrayItem], opts: MergeOptions, progress=None) -> PdfDocume
     out = pdfium.PdfDocument.new()
     outline = []   # (tên, trang bắt đầu 0-based)
     modes = {}     # trang trong file ghép -> "gray" | "bw"
+    user_rot = set()   # trang người dùng đã tự xoay trong khay -> không tự xoay lại
+    papers = {}        # khổ -> [trang trong file ghép] đổi khổ riêng
     for n, row in enumerate(rows):
         src = pdfium.PdfDocument(row.item.path, password=row.item.password)
+        it = row.item
         try:
             at = len(out)
             out.import_pages(src, row.pages)
-            eff = {p: row.item.mode_of(p, opts.color) for p in row.pages}
+            # trang trắng chèn sau từng trang (chèn từ cuối lên để chỉ số không lệch)
+            for k in reversed(range(len(row.pages))):
+                extra = it.extra_after(row.pages[k])
+                if extra:
+                    w, h = out.get_page_size(at + k)
+                    for _ in range(extra):
+                        out.new_page(w, h, index=at + k + 1).close()
+            idx, off = [], 0
+            for k, p in enumerate(row.pages):
+                idx.append(at + k + off)
+                off += it.extra_after(p)
+            eff = {p: it.mode_of(p, opts.color) for p in row.pages}
             autos = [p for p, m in eff.items() if m == "auto"]
             if autos:                                   # tự nhận trang có màu thật
                 from .colormode import resolve_auto
-                eff.update(resolve_auto(src, autos, AUTO_CACHE, (row.item.path, os.path.getmtime(row.item.path))))
+                eff.update(resolve_auto(src, autos, AUTO_CACHE, (it.path, os.path.getmtime(it.path))))
             for k, p in enumerate(row.pages):
                 m = eff[p]
                 if m in CONVERT_MODES:
-                    modes[at + k] = m
-            outline.append((os.path.splitext(row.item.name)[0], at))
+                    modes[idx[k]] = m
+                deg = int(it.page_rot.get(str(p), 0) or 0) % 360
+                if deg:
+                    pg = out[idx[k]]
+                    pg.set_rotation((pg.get_rotation() + deg) % 360)
+                    pg.close()
+                    user_rot.add(idx[k])
+                paper = it.page_paper.get(str(p))
+                if paper:
+                    papers.setdefault(paper, []).append(idx[k])
+            outline.append((os.path.splitext(it.name)[0], at))
             if row.blanks_after:
                 w, h = out.get_page_size(len(out) - 1)   # trang trắng cùng khổ trang trước
                 for _ in range(row.blanks_after):
@@ -204,10 +292,12 @@ def merge(items: list[TrayItem], opts: MergeOptions, progress=None) -> PdfDocume
     doc = PdfDocument(data=data)
     doc.path = None
     if opts.auto_rotate:
-        doc.auto_rotate()
+        doc.auto_rotate([i for i in range(doc.page_count) if i not in user_rot])
     if opts.resize:
         # chỉ đổi khổ trang nội dung, trang trắng đổi theo luôn cho đồng bộ
         doc.resize_pages(list(range(doc.page_count)), opts.resize, "keep", opts.resize_mode)
+    for paper, pgs in papers.items():                 # khổ riêng từng trang (đặt trong khay) – ưu tiên hơn khổ chung
+        doc.resize_pages(pgs, paper, "keep", opts.resize_mode)
     links = []
     if nfront:
         front, links = build_front(opts, rows, doc.page_size_pt(0), cover, toc, pad)
