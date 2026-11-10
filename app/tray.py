@@ -58,10 +58,15 @@ class TrayDialog(QDialog):
         top = QHBoxLayout()
         for text, ic, fn in (("Thêm file", "open", self.add_files_dialog),
                              ("Thêm tab đang mở", "tabs", self._add_open_tabs),
+                             ("Nhân bản file", "dup", self.duplicate_selected),
                              ("Xóa khỏi khay", "delete", self.remove_selected)):
             b = QPushButton(icon(ic, colors["text"]), text)
             b.clicked.connect(fn)
             top.addWidget(b)
+            if fn == self.duplicate_selected:
+                self.btn_dup = b
+                b.setToolTip("1 file dùng ở nhiều đoạn: nhân bản thành 2, 3… dòng ngay bên dưới, mỗi dòng chọn trang "
+                             "riêng rồi kéo tới đúng chỗ (Ctrl+D)")
         top.addStretch()
         b = QPushButton("Mở mẫu khay…")
         b.clicked.connect(self.open_template)
@@ -133,6 +138,10 @@ class TrayDialog(QDialog):
             self.table.setColumnWidth(c, w)
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.itemSelectionChanged.connect(self._row_selected)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._table_menu)
+        from PySide6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("Ctrl+D"), self.table, self.duplicate_selected)
         # 5b: kéo thả dòng để sắp thứ tự; thả file / thư mục vào đúng vị trí trong bảng
         self.table.setDragEnabled(True)
         self.table.setAcceptDrops(True)
@@ -479,6 +488,46 @@ class TrayDialog(QDialog):
         if not paths:
             QMessageBox.information(self, "Khay ghép", "Chưa có tab nào đã lưu thành file.")
         self.add_paths(paths)
+
+    def duplicate_selected(self) -> int:
+        """Nhân bản các file đang chọn (cùng file gốc, chọn trang riêng) – bản sao nằm ngay dưới bản gốc."""
+        from dataclasses import replace
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows and 0 <= self._picker_row < len(self.items):
+            rows = [self._picker_row]
+        if not rows:
+            return 0
+        new_rows = []
+        shift = 0
+        for r in rows:
+            r += shift
+            src = self.items[r]
+            self.items.insert(r + 1, replace(src, page_colors=dict(src.page_colors)))
+            new_rows.append(r + 1)
+            shift += 1
+        self.refresh()
+        self.table.clearSelection()
+        for r in new_rows:
+            self.table.selectRow(r)
+        self._persist()
+        self.lbl_saved.setText(f"Đã nhân bản {len(rows)} file – chọn trang riêng cho bản sao rồi kéo dòng tới đúng chỗ.")
+        self.btn_open_dir.setVisible(False)
+        return len(rows)
+
+    def _table_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        r = self.table.rowAt(pos.y())
+        if r < 0:
+            return
+        if r not in {i.row() for i in self.table.selectedIndexes()}:
+            self.table.selectRow(r)
+        m = QMenu(self)
+        m.addAction("Nhân bản file (dùng ở đoạn khác)", self.duplicate_selected)
+        m.addAction("Lên trên", lambda: self.move(r, -1))
+        m.addAction("Xuống dưới", lambda: self.move(r, 1))
+        m.addSeparator()
+        m.addAction("Xóa khỏi khay", self.remove_selected)
+        m.exec(self.table.viewport().mapToGlobal(pos))
 
     def remove_selected(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)

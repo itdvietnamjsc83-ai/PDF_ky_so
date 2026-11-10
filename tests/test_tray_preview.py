@@ -38,7 +38,7 @@ def test_click_file_shows_preview_with_page_numbers(tray, qapp, tmp_path):
     assert p.item is tray.items[1] and p.picker.count() == 3
     assert p.picker.viewMode() == QListView.IconMode and p.picker.isWrapping()      # lưới cuộn dọc
     # file 1 có 6 trang, in 2 mặt -> file 2 bắt đầu ở trang 7 của file ghép
-    assert p.picker.item(0).text() == "Trang 1 → 7" and p.picker.item(2).text() == "Trang 3 → 9"
+    assert p.picker.item(0).text() == "Trang 1\nlà trang 7 của file ghép" and p.picker.item(2).text().endswith("trang 9 của file ghép")
     assert "3 trang · giữ 3 · bỏ 0" in p.info.text()
     assert len(p._cache) == 3                       # đã vẽ ảnh trang
 
@@ -53,7 +53,7 @@ def test_keep_drop_pages_updates_tray(tray, qapp, tmp_path):
     p.picker.item(4).setCheckState(Qt.Unchecked)
     it = tray.items[0]
     assert not it.whole and it.ranges == "1, 3-4, 6"
-    assert p.picker.item(1).text() == "Trang 2 · bỏ" and p.picker.item(2).text() == "Trang 3 → 2"
+    assert p.picker.item(1).text().startswith("Trang 2\n(bỏ") and p.picker.item(2).text() == "Trang 3\nlà trang 2 của file ghép"
     assert "giữ 4 · bỏ 2" in p.info.text()
     assert "4 trang" in tray.lbl_total.text()
     p.quick("invert")
@@ -132,3 +132,30 @@ def test_remove_file_clears_preview(tray, qapp, tmp_path):
     pump(qapp, 200)
     tray.remove_selected()
     assert tray.preview.item is None and tray.preview.picker.count() == 0
+
+
+def test_duplicate_file_for_reuse_in_several_parts(tray, qapp, tmp_path):
+    """1 file dùng ở nhiều đoạn: nhân bản dòng, mỗi bản chọn trang riêng, xen file khác ở giữa."""
+    from app.merge import merge
+    a, b = files(tmp_path, [6, 2])
+    tray.add_paths([a, b])
+    tray.table.selectRow(0)
+    assert tray.duplicate_selected() == 1
+    assert [it.path for it in tray.items] == [tray.items[0].path] * 2 + [tray.items[2].path]
+    assert tray.items[0] is not tray.items[1]
+    tray.items[0].whole, tray.items[0].ranges = False, "1-2"
+    tray.items[1].whole, tray.items[1].ranges = False, "5-6"
+    tray.move_rows([1], 3)                                          # bản sao xuống sau file b
+    assert [it.ranges for it in tray.items if not it.whole] == ["1-2", "5-6"]
+    tray.cb_duplex.setChecked(False)
+    tray.refresh()
+    assert "6 trang" in tray.lbl_total.text()                       # 2 + 2 + 2
+
+
+def test_page_number_badge_on_thumbnails(tray, qapp, tmp_path):
+    from PySide6.QtGui import QImage
+    from app.tray_preview import page_badge
+    img = QImage(120, 170, QImage.Format_ARGB32)
+    img.fill(0xffffffff)
+    out = page_badge(img, 12)
+    assert out.pixelColor(8, 8).blue() > 150 and out.pixelColor(8, 8).red() < 60   # nhãn số trang góc trên-trái

@@ -41,6 +41,28 @@ def dropped_overlay(img: QImage) -> QImage:
     return out
 
 
+def page_badge(img: QImage, n: int, dpr: float = 1.0) -> QImage:
+    """Số trang (của file gốc) to, rõ ở góc trên-trái ảnh trang – nhìn là biết trang số mấy."""
+    out = img.convertToFormat(QImage.Format_ARGB32)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing)
+    f = QFont()
+    f.setBold(True)
+    f.setPixelSize(int(max(11, min(22, out.width() / dpr / 7)) * dpr))
+    p.setFont(f)
+    fm = p.fontMetrics()
+    text = str(n)
+    w, h = fm.horizontalAdvance(text) + int(12 * dpr), fm.height() + int(2 * dpr)
+    m = int(4 * dpr)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(0, 95, 184, 225))
+    p.drawRoundedRect(m, m, w, h, 4 * dpr, 4 * dpr)
+    p.setPen(QColor("#ffffff"))
+    p.drawText(m, m, w, h, Qt.AlignCenter, text)
+    p.end()
+    return out
+
+
 def color_badge(img: QImage, text: str) -> QImage:
     """Nhãn nhỏ góc trên-phải ảnh trang: chế độ màu riêng của trang (Xám / ĐT / Chữ đen)."""
     out = img.convertToFormat(QImage.Format_ARGB32)
@@ -124,7 +146,7 @@ class TrayPreview(QFrame):
         from PySide6.QtWidgets import QSpinBox
         self.sp_zoom = QSpinBox(minimum=10, maximum=1000, value=100, suffix="%")   # 1.0.22: gõ số % được
         self.sp_zoom.setKeyboardTracking(False)
-        self.sp_zoom.setFixedWidth(66)
+        self.sp_zoom.setFixedWidth(78)
         self.sp_zoom.setToolTip("Tỉ lệ xem – gõ số rồi Enter")
         self.sp_zoom.valueChanged.connect(self._zoom_typed)
         zrow.addWidget(self.lbl_zoom)
@@ -221,9 +243,9 @@ class TrayPreview(QFrame):
             from .colormode import MODE_SHORT
             t += f" · {MODE_SHORT[m]}"
         if not keep:
-            return t + " · bỏ"
+            return t + "\n(bỏ – không ghép)"
         if self.out_start is not None and pos is not None and i in pos:
-            return f"{t} → {self.out_start + pos[i]}"
+            return f"{t}\nlà trang {self.out_start + pos[i]} của file ghép"
         return t
 
     def _relabel(self):
@@ -412,7 +434,9 @@ class TrayPreview(QFrame):
         if li.checkState() != Qt.Checked:
             img = dropped_overlay(img)
         dpr = self.picker.devicePixelRatioF()
-        pm = QPixmap.fromImage(img.scaledToWidth(max(1, int(self.icon_w() * dpr)), Qt.SmoothTransformation))
+        sc = img.scaledToWidth(max(1, int(self.icon_w() * dpr)), Qt.SmoothTransformation)
+        sc = page_badge(sc, i + 1, dpr)          # số trang gốc in ngay trên ảnh trang
+        pm = QPixmap.fromImage(sc)
         pm.setDevicePixelRatio(dpr)
         self.picker.blockSignals(True)
         li.setIcon(QIcon(pm))
@@ -440,7 +464,7 @@ class TrayPreview(QFrame):
         # chia đều bề ngang cho các cột -> các trang nằm giữa, không dồn về góc trái
         vw = max(1, self.picker.viewport().width() - 4)
         cols = max(1, vw // (w + 24))
-        self.picker.setGridSize(QSize(max(w + 24, vw // cols), h + 36))
+        self.picker.setGridSize(QSize(max(w + 24, vw // cols), h + 50))   # 2 dòng chữ: số trang + chỗ trong file ghép
         self.lbl_zoom.setText(f"{self.zoom_percent()}%")
         self.sp_zoom.blockSignals(True)
         self.sp_zoom.setValue(self.zoom_percent())
