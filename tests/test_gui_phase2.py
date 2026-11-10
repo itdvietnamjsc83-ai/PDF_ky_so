@@ -265,6 +265,8 @@ def test_toolbar_every_button_responds(win, qapp, samples, monkeypatch):
     from app import ui_import
     for cls in (ui_import.ImportOptionsDialog, ui_import.ImportSettingsDialog, ui_import.ColorModeDialog):
         monkeypatch.setattr(cls, "exec", lambda self: QDialog.Rejected)
+    from app.fileinfo_dialog import FileInfoDialog
+    monkeypatch.setattr(FileInfoDialog, "exec", lambda self: QDialog.Rejected)
     from app import ui_license
     for cls in (ui_license.ActivateDialog, ui_license.AboutDialog, ui_license.DeveloperDialog):
         monkeypatch.setattr(cls, "exec", lambda self: QDialog.Rejected)

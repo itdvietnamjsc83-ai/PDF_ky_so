@@ -153,6 +153,16 @@ def _no_tray_save_dialog(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_save_mode_prompt(monkeypatch):
+    """1.0.22: bấm Lưu hỏi "lưu đè / lưu file mới" – kiểm thử mặc định chọn lưu đè (không mở hộp thoại thật)."""
+    try:
+        import app.mainwindow as _mw
+    except Exception:
+        return
+    monkeypatch.setattr(_mw.MainWindow, "_ask_save_mode", lambda self, tab: "overwrite")
+
+
+@pytest.fixture(autouse=True)
 def _free_closed_windows():
     """Xóa hẳn các cửa sổ đã đóng sau mỗi kiểm thử. Nếu không, hàng trăm cửa sổ cũ còn nằm trong bộ nhớ làm các
     thao tác toàn ứng dụng (đổi giao diện sáng/tối = áp lại stylesheet cho MỌI widget) chậm dần tới mức quá giờ."""

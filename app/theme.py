@@ -177,7 +177,7 @@ QFrame#quickrow {{ background: {c['bg']}; border: 0; }}
 QToolButton#qa {{ border: 0; border-radius: 5px; padding: 0; margin: 0; background: transparent; }}
 QToolButton#qa:hover {{ background: {c['hover']}; }}
 QToolButton#qa:disabled {{ background: transparent; }}
-QToolButton#modetab {{ border: 0; border-bottom: 2px solid transparent; padding: 4px 10px 3px 10px;
+QToolButton#modetab {{ border: 0; border-bottom: 2px solid transparent; padding: 4px 8px 3px 8px;
   background: transparent; color: {c['text2']}; font-size: 12px; font-weight: 500; }}
 QToolButton#modetab:hover {{ color: {c['text']}; background: {c['hover']}; border-radius: 5px; }}
 QToolButton#modetab:checked {{ color: {c['accent']}; border-bottom: 2px solid {c['accent']}; }}

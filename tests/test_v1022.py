@@ -655,7 +655,7 @@ def test_layout_styles_quick_bar_and_start_tab(win, qapp, samples):
     assert not win.rail.isVisible() and all(t.isVisible() for t in win.mode_tabs)
     win.mode_tabs[2].click()
     assert win.mode_group.checkedId() == 2 and win.mode_tabs[2].isChecked() and not win.mode_tabs[0].isChecked()
-    assert {c for _b, _i, c in win.quick_buttons} == {"open", "save", "print", "undo", "redo"}
+    assert {c for _b, _i, c in win.quick_buttons} == {"open", "save", "saveas", "print", "undo", "redo"}
     win.set_layout_style("rail", save=False)
     pump(qapp, 20)
     assert win.rail.isVisible() and not win.mode_tabs[0].isVisible()
@@ -691,3 +691,95 @@ def test_thumbnail_column_resizable(win, qapp, samples):
     pump(qapp, 50)
     th._apply_width()
     assert th.thumb_w < 80
+
+
+def test_save_as_new_file_keeps_original(win, qapp, tmp_path, monkeypatch):
+    from .test_phase4 import _contract
+    """Sửa rồi 'Lưu thành…' ra file mới: file gốc giữ nguyên, tab chuyển sang file mới."""
+    from PySide6.QtWidgets import QFileDialog
+    from app.mainwindow import CMD_LABEL, READY
+    from app import notes
+    assert "saveas" in READY and CMD_LABEL["saveas"].startswith("Lưu thành")
+    src = tmp_path / "goc.pdf"
+    src.write_bytes(_contract(1))
+    before = src.read_bytes()
+    win.open_files([str(src)])
+    pump(qapp)
+    tab = win.current()
+    notes.add_note(tab.doc, 0, 100, 100, "Sửa thử", "An")
+    seen = {}
+
+    def fake_dialog(parent, title, default, flt):
+        seen["default"] = default
+        return str(tmp_path / "moi"), "PDF (*.pdf)"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_dialog))
+    win.run("saveas")
+    assert seen["default"].endswith("goc_ban_sua.pdf")          # gợi ý tên mới, không trùng file gốc
+    assert src.read_bytes() == before                            # file gốc không bị ghi đè
+    new = tmp_path / "moi.pdf"
+    assert new.exists() and tab.doc.path == str(new) and not tab.doc.modified
+    assert any(n.text == "Sửa thử" for n in notes.list_notes(PdfDocument(str(new))))
+
+
+def test_save_asks_overwrite_or_new(win, qapp, tmp_path, monkeypatch):
+    """Bấm Lưu khi đã sửa file có sẵn: hỏi lưu đè hay lưu ra file mới (tránh ghi nhầm vào file gốc)."""
+    from PySide6.QtWidgets import QFileDialog
+    from app import notes
+    from app.mainwindow import MainWindow
+    from .test_phase4 import _contract
+    asked = []
+    monkeypatch.setattr(MainWindow, "_ask_save_mode", lambda self, tab: asked.append(1) or "new")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a: (str(tmp_path / "goc_ban_sua.pdf"), "")))
+    src = tmp_path / "goc.pdf"
+    src.write_bytes(_contract(1))
+    before = src.read_bytes()
+    win.open_files([str(src)])
+    pump(qapp)
+    tab = win.current()
+    win.run("save")
+    assert asked == []                                           # chưa sửa gì: không hỏi
+    before = src.read_bytes()
+    notes.add_note(tab.doc, 0, 100, 100, "Sửa", "An")
+    win.run("save")
+    assert asked == [1] and src.read_bytes() == before            # chọn "lưu ra file mới": gốc giữ nguyên
+    assert tab.doc.path.endswith("goc_ban_sua.pdf")
+    notes.add_note(tab.doc, 0, 200, 200, "Sửa tiếp", "An")
+    win.run("save")                                               # đang ở bản mới: lưu luôn, không hỏi lại
+    assert asked == [1] and not tab.doc.modified
+
+
+def test_file_info_view_edit_and_clean(win, qapp, tmp_path, monkeypatch):
+    import io
+    import pikepdf
+    from app import fileinfo
+    from app.fileinfo_dialog import FileInfoDialog
+    from .test_phase4 import _contract
+    with pikepdf.open(io.BytesIO(_contract(1))) as pk:
+        with pk.open_metadata() as m:
+            m["dc:creator"] = ["Nguyễn Văn A"]
+        pk.docinfo["/Author"] = "Nguyễn Văn A"
+        pk.docinfo["/Company"] = "Cty X"
+        pk.docinfo["/CreationDate"] = "D:20261110093000+07'00'"
+        pk.save(str(tmp_path / "tt.pdf"))
+    win.open_files([str(tmp_path / "tt.pdf")])
+    pump(qapp)
+    tab = win.current()
+    seen = {}
+
+    def fake_exec(self):
+        rows = {self.table.item(r, 0).data(0x0100): self.table.item(r, 1).text() for r in range(self.table.rowCount())}
+        seen.update(rows)
+        self.clear_all()
+        return FileInfoDialog.Accepted
+    monkeypatch.setattr(FileInfoDialog, "exec", fake_exec)
+    win.run("fileinfo")
+    assert seen["/Author"] == "Nguyễn Văn A" and seen["/Company"] == "Cty X"
+    assert seen["/CreationDate"] == "10/11/2026 09:30:00"
+    assert tab.doc.modified
+    win.save(tab)
+    info = fileinfo.read_info((tmp_path / "tt.pdf").read_bytes())
+    assert "/Author" not in info["fields"] and "/Company" not in info["fields"] and not info["xmp"]
+    assert "/CreationDate" not in info["fields"]
+    tab.doc.undo()
+    assert fileinfo.read_info(tab.doc.to_bytes())["fields"].get("/Author") == "Nguyễn Văn A"

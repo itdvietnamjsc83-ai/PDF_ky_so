@@ -7,8 +7,8 @@ import sys
 
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QImage, QKeySequence, QPainter
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QGridLayout,
+                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
                                QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget,
                                QStatusBar, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
@@ -22,9 +22,11 @@ from .viewer import PageView
 # (mã, nhãn, [nhóm công cụ: [(mã lệnh, nhãn, icon, nổi bật?)]])
 MODES = [
     ("home", "Trang chủ", [
-        [("open", "Mở", "open", 0), ("save", "Lưu", "save", 0), ("print", "In", "print", 0)],
+        [("open", "Mở", "open", 0), ("save", "Lưu", "save", 0), ("saveas", "Lưu thành…", "saveas", 0),
+         ("print", "In", "print", 0)],
         [("undo", "Hoàn tác", "undo", 0), ("redo", "Làm lại", "redo", 0)],
-        [("tray", "Khay ghép", "merge", 0), ("image", "Chèn ảnh", "image", 0), ("protect", "Lưu có bảo vệ", "lock", 0)]]),
+        [("tray", "Khay ghép", "merge", 0), ("image", "Chèn ảnh", "image", 0), ("protect", "Lưu có bảo vệ", "lock", 0),
+         ("fileinfo", "Thông tin file", "info", 0)]]),
     ("edit", "Chỉnh sửa", [
         [("select", "Chọn", "select", 0), ("edittext", "Sửa chữ", "text", 0), ("textbox", "Hộp chữ", "textbox", 0),
          ("hand", "Chữ viết tay", "hand", 0), ("image", "Ảnh", "image", 0)],
@@ -47,7 +49,7 @@ MODES = [
     ("protect", "Bảo vệ", [
         [("protect", "Lưu có bảo vệ", "lock", 1), ("password", "Mật khẩu", "key", 0),
          ("printperm", "Quyền in", "print", 0)],
-        [("presets", "Mẫu bảo vệ", "shield", 0)]]),
+        [("presets", "Mẫu bảo vệ", "shield", 0), ("fileinfo", "Thông tin file", "info", 0)]]),
     ("tray", "Khay ghép", [
         [("tray", "Mở khay", "merge", 0), ("trayadd", "Thêm file", "open", 0),
          ("traytabs", "Thêm tab đang mở", "tabs", 0)],
@@ -65,7 +67,7 @@ MODES = [
 ]
 
 # lệnh đã có ở phiên bản này; còn lại báo giai đoạn phát triển
-READY = {"open", "save", "print", "undo", "redo", "blank", "delete", "rotate", "rotateleft", "insertpdf",
+READY = {"open", "save", "saveas", "fileinfo", "print", "undo", "redo", "blank", "delete", "rotate", "rotateleft", "insertpdf",
          "tray", "trayadd", "traytabs", "merge", "mergesign", "split", "resize", "autorotate", "image",
          "stamp", "sigimg", "seam", "digisign", "verify",
          "edittext", "textbox", "hand", "note", "symbol", "shape", "pen", "erase", "find",
@@ -798,6 +800,7 @@ class MainWindow(QMainWindow):
         qh.setSpacing(2)
         self.quick_buttons = []
         for cmd, ic, tip in (("open", "open", "Mở (Ctrl+O)"), ("save", "save", "Lưu (Ctrl+S)"),
+                             ("saveas", "saveas", "Lưu thành file mới, giữ nguyên file gốc (Ctrl+Shift+S)"),
                              ("print", "print", "In (Ctrl+P)"), (None, None, None),
                              ("undo", "undo", "Hoàn tác (Ctrl+Z)"), ("redo", "redo", "Làm lại (Ctrl+Y)")):
             if cmd is None:
@@ -813,7 +816,7 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _=False, c=cmd: self.run(c))
             self.quick_buttons.append((b, ic, cmd))
             qh.addWidget(b)
-        qh.addSpacing(10)
+        qh.addSpacing(6)
         self.mode_tabs = []
         for k, (mode, label, _g) in enumerate(MODES):
             t = QToolButton(objectName="modetab", text=RAIL_LABEL.get(mode, label).replace("&", "&&"), checkable=True)
@@ -1886,13 +1889,20 @@ class MainWindow(QMainWindow):
         elif pl is not None and pl.on_cancel:
             tab.view.cancel_placement()
 
-    def save(self, tab: DocTab | None = None) -> bool:
+    def save(self, tab: DocTab | None = None, ask: bool = True) -> bool:
         tab = tab or self.current()
         if not tab or not self.license_ok():
             return False
         self._finish_object_edit(tab)
         if not tab.doc.path:
             return self.save_as()
+        if ask and tab.doc.modified and not getattr(tab, "overwrite_ok", False) and \
+                self.settings.value("save/ask", True) not in (False, "false"):
+            mode = self._ask_save_mode(tab)               # tránh lưu nhầm đè lên file gốc
+            if mode is None:
+                return False
+            if mode == "new":
+                return self.save_as()
         if tab.doc.signature_count() and tab.doc.modified and not self._confirm_save_signed(tab):
             return False
         from .retention import keeps
@@ -1911,6 +1921,59 @@ class MainWindow(QMainWindow):
         self._update_state()
         return True
 
+    def _ask_save_mode(self, tab) -> str | None:
+        """Bấm Lưu khi đang sửa file có sẵn: lưu đè file hiện tại hay lưu ra file mới? -> "overwrite" | "new" | None."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Lưu thay đổi")
+        box.setText(f"Lưu thay đổi của “{tab.doc.name}” vào đâu?")
+        box.setInformativeText("Lưu đè: thay hẳn file gốc bằng bản đã sửa.\n"
+                               "Lưu ra file mới: giữ nguyên file gốc, bản sửa thành file khác.")
+        b_new = box.addButton("Lưu ra file mới…", QMessageBox.AcceptRole)
+        b_over = box.addButton("Lưu đè file hiện tại", QMessageBox.DestructiveRole)
+        box.addButton("Hủy", QMessageBox.RejectRole)
+        box.setDefaultButton(b_new)
+        chk = QCheckBox("Không hỏi lại nữa (luôn lưu đè)")
+        box.setCheckBox(chk)
+        box.exec()
+        c = box.clickedButton()
+        if c is b_over:
+            tab.overwrite_ok = True                   # file này không hỏi lại trong lần mở này
+            if chk.isChecked():
+                self.settings.setValue("save/ask", False)
+            return "overwrite"
+        if c is b_new:
+            return "new"
+        return None
+
+    def file_info(self, tab=None) -> bool:
+        """Xem / sửa / xóa các trường thông tin của file (tác giả, ngày tạo, phần mềm…)."""
+        from .fileinfo import write_info
+        from .fileinfo_dialog import FileInfoDialog
+        tab = tab or self.current()
+        if not tab:
+            return False
+        self._finish_object_edit(tab)
+        doc = tab.doc
+        dlg = FileInfoDialog(self, doc, doc.to_bytes(), readonly=not doc.can_modify)
+        if dlg.exec() != QDialog.Accepted or not dlg.changed():
+            return False
+        if not self._writable(tab, "Sửa thông tin file"):
+            return False
+        fields, drop_xmp = dlg.values()
+        try:
+            data = write_info(doc.to_bytes(), fields, remove_xmp=drop_xmp)
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"Không sửa được thông tin file:\n{e}")
+            return False
+        doc._snapshot()
+        doc._load_bytes(data)
+        doc._changed()
+        tab.refresh()
+        self._update_state()
+        self._flash("Đã cập nhật thông tin file. Bấm Lưu để ghi vào file · Ctrl+Z để hoàn tác.")
+        return True
+
     def _confirm_save_signed(self, tab) -> bool:
         st = tab.sig_state
         who = f" của {', '.join(st.names)}" if st and st.names else ""
@@ -1927,20 +1990,38 @@ class MainWindow(QMainWindow):
         self._finish_object_edit(tab)
         if tab.doc.signature_count() and tab.doc.modified and not self._confirm_save_signed(tab):
             return False
-        default = tab.doc.path or os.path.join(getattr(tab, "save_dir", None) or self.settings.value("last_dir", "") or "",
-                                               getattr(tab, "title", None) or tab.doc.name)
-        path, _ = QFileDialog.getSaveFileName(self, "Lưu thành", default, "PDF (*.pdf)")
+        doc = tab.doc
+        if doc.path:                                  # gợi ý tên mới cạnh file gốc -> không ghi đè file cũ
+            stem, _ext = os.path.splitext(os.path.basename(doc.path))
+            folder = os.path.dirname(doc.path)
+            default = os.path.join(folder, f"{stem}_ban_sua.pdf")
+            k = 2
+            while os.path.exists(default):
+                default = os.path.join(folder, f"{stem}_ban_sua_{k}.pdf")
+                k += 1
+        else:
+            default = os.path.join(getattr(tab, "save_dir", None) or self.settings.value("last_dir", "") or "",
+                                   getattr(tab, "title", None) or doc.name)
+        path, _ = QFileDialog.getSaveFileName(self, "Lưu thành file mới", default, "PDF (*.pdf)")
         if not path:
             return False
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
+        old = doc.path
+        if old and os.path.abspath(path) == os.path.abspath(old):
+            tab.overwrite_ok = True
+            return self.save(tab, ask=False)          # chọn đúng file đang mở = lưu đè như nút Lưu
         try:
-            tab.doc.save(path)
+            doc.save(path)
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"Không lưu được:\n{e}")
             return False
+        self.settings.setValue("last_dir", os.path.dirname(path))
+        tab.overwrite_ok = True                       # từ giờ đang làm trên bản mới: Lưu ghi vào bản mới
         self.tabs.setTabToolTip(self.tabs.currentIndex(), path)
         self._update_state()
+        self._flash(f"Đã lưu thành {os.path.basename(path)}" +
+                    (" · file gốc giữ nguyên" if old else "") + ". Đang làm việc trên file mới.")
         return True
 
     # ---------- lệnh ----------
@@ -2022,6 +2103,12 @@ class MainWindow(QMainWindow):
         pages = tab.thumbs.selected_pages() or [view.current_page()]
         if cmd == "save":
             self.save()
+            return
+        if cmd == "saveas":
+            self.save_as()
+            return
+        if cmd == "fileinfo":
+            self.file_info(tab)
             return
         if cmd == "print":
             self.print_doc(tab)
