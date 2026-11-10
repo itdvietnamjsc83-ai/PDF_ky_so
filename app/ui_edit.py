@@ -760,6 +760,9 @@ class ToolOptions(QFrame):
             if k >= 0:
                 self.cb_font.setCurrentIndex(k)
             self.cb_align.setCurrentIndex(max(0, self.cb_align.findData(spec.get("align", "left"))))
+        elif kind == "stamp":
+            rows |= {"colors"}
+            self.set_color(spec.get("color", "#d32f2f"))
         elif kind == "ink":
             rows |= {"colors", "width", "pen", "smooth"}
             self.cb_smooth.setCurrentIndex(max(0, self.cb_smooth.findData(int(spec.get("smooth", 1)))))
@@ -794,7 +797,8 @@ class ToolOptions(QFrame):
         self.sp_angle.setValue(float(spec.get("angle", 0) or 0))
         self.title.setText(label)
         self.hint.setText("Kéo để di chuyển, kéo góc đổi cỡ, núm tròn để xoay. "
-                          + ("Nháy đúp để sửa chữ ngay trên trang. " if kind == "text" else "")
+                          + ("Nháy đúp để sửa chữ ngay trên trang. " if kind == "text" else
+                             "Nháy đúp để sửa chữ, hình dạng, viền, cỡ. " if kind == "stamp" else "")
                           + "Delete: xóa · Enter/bấm ra ngoài: xong · Esc: bỏ thay đổi.")
         self.btn_close.setToolTip("Xong")
         for k, w in self.rows.items():
@@ -811,7 +815,9 @@ class ToolOptions(QFrame):
         kind = s.get("kind")
         s["opacity"] = self.sl_opacity.value()
         s["angle"] = self.sp_angle.value() % 360
-        if kind == "text":
+        if kind == "stamp":
+            s["color"] = self._color
+        elif kind == "text":
             s["color"] = self._color
             s["size"] = self.sp_size.value()
             s["font"] = self.cb_font.currentData() or s.get("font", "")

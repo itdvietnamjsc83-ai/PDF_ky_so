@@ -3724,6 +3724,20 @@ class MainWindow(QMainWindow):
 
         def commit(pg, rect, angle=0.0):
             new = self._spec_from_frame(ctx, rect, angle)
+            if pg != page:                            # kéo sang trang khác: gỡ ở trang cũ, dựng ở trang mới
+                try:
+                    ed.delete()
+                    items.add_item(tab.doc, pg, new, snapshot=False)
+                    tab.doc._changed()
+                except Exception as e:
+                    QMessageBox.warning(self, APP_NAME, f"Không chuyển được sang trang {pg + 1}:\n{e}")
+                self._sel = None
+                self._last_sel = (tab, pg, [new["id"]])
+                self._end_item_panel()
+                tab.refresh()
+                self._update_state()
+                self._flash(f"Đã chuyển {ctx['label'].lower()} sang trang {pg + 1}. Ctrl+Z để hoàn tác.")
+                return
             try:
                 ed.commit(new, force=ctx.get("force", False))
             except Exception as e:
@@ -3745,7 +3759,12 @@ class MainWindow(QMainWindow):
                                  keep_ratio=items.keep_ratio(spec), angle=float(spec.get("angle", 0) or 0),
                                  rotatable=True, commit_outside=True)
         pl.on_change = lambda _pl: self._sel_frame_changed()
-        if spec.get("kind") == "text" or (spec.get("kind") == "shape" and spec.get("shape") not in
+        pl.cross_page = True                          # kéo nội dung sang trang khác cũng được
+        if spec.get("kind") == "stamp":
+            pl.on_dblclick = lambda _pl: self._edit_stamp_selected()
+            pl.hint = ("Con dấu · kéo để dời (sang trang khác cũng được), kéo góc đổi cỡ, núm tròn xoay · "
+                       "nháy đúp: sửa chữ, hình dạng, màu · Delete: xóa")
+        elif spec.get("kind") == "text" or (spec.get("kind") == "shape" and spec.get("shape") not in
                                           items.LINE_SHAPES | items.SYMBOL_SHAPES | {"check", "cross", "highlight"}):
             pl.on_dblclick = lambda _pl: self._inline_edit_selected()
         self.tool_opts.show_item(spec, item.label)
@@ -4771,19 +4790,100 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def stamp_text_doc(self, tab):
+        """1.0.22 – con dấu chữ tùy biến: đặt nổi trên trang, kéo tới chỗ / trang bất kỳ, sửa lại được."""
+        from .stamp_dialog import StampDialog
         from .tools import text_stamp
-        from .ui_tools import StampTextDialog
+        if not self._writable(tab, "Đóng dấu chữ"):
+            return
         sel = tab.thumbs.selected_pages()
-        dlg = StampTextDialog(self, len(sel) > 1)
-        if dlg.exec() != StampTextDialog.Accepted:
+        dlg = StampDialog(self, self.settings, has_selection=len(sel) > 1)
+        if dlg.exec() != StampDialog.Accepted:
             return
         v = dlg.values()
-        pages = {"all": list(range(tab.doc.page_count)), "current": [tab.view.current_page()],
-                 "selected": sel}[v["scope"]]
-        text_stamp(tab.doc, pages, v["text"], v["style"], v["color"], v["opacity"], position=v["position"])
-        tab.refresh()
-        self._update_state()
-        self._flash(f"Đã đóng dấu chữ “{v['text']}” lên {len(pages)} trang. Ctrl+Z để hoàn tác.")
+        if v["style"] == "watermark":
+            pages = {"all": list(range(tab.doc.page_count)), "current": [tab.view.current_page()],
+                     "selected": sel}.get(v["scope"], [tab.view.current_page()])
+            text_stamp(tab.doc, pages, v["text"], "watermark", v["color"], v["opacity"])
+            tab.refresh()
+            self._update_state()
+            self._flash(f"Đã đóng chữ chìm “{v['text']}” lên {len(pages)} trang. Ctrl+Z để hoàn tác.")
+            return
+        dlg.remember()
+        self.place_stamp(tab, v["spec"], v["scope"])
+
+    def place_stamp(self, tab, spec: dict, scope: str = "current", page: int | None = None, center=None):
+        """Khung con dấu nổi trên trang: kéo / bấm sang trang khác / kéo góc / xoay, Enter hoặc nháy đúp để đóng."""
+        from . import items
+        from .ui_edit import pil_to_qimage
+        x0, y0, x1, y1 = items.spec_rect(spec)
+        w, h = x1 - x0, y1 - y0
+        base = dict(spec, rect=[0, 0, w, h], angle=0)
+        img, m = items.render_preview(base)
+        angle = float(spec.get("angle", 0) or 0)
+
+        def commit(pg, rect, ang=0.0):
+            k = (rect[2] - rect[0]) / max(1e-6, w + 2 * m)
+            inner = [rect[0] + m * k, rect[1] + m * k, rect[2] - m * k, rect[3] - m * k]
+            sp = dict(spec, rect=inner, angle=round(float(ang or 0) % 360, 2))
+            sp.pop("id", None)
+            pages = self._scope_pages(tab, pg, scope)
+            doc = tab.doc
+            try:
+                doc._snapshot()
+                for i in pages:
+                    items.add_item(doc, i, dict(sp), snapshot=False)
+                doc._changed()
+            except Exception as e:
+                QMessageBox.warning(self, APP_NAME, f"Không đóng được dấu:\n{e}")
+                return
+            tab.refresh()
+            self._update_state()
+            self._flash((f"Đã đóng dấu lên {len(pages)} trang. " if len(pages) > 1 else "Đã đóng dấu. ") +
+                        "Bấm vào dấu để kéo / xoay / đổi cỡ, nháy đúp để sửa chữ, hình dạng. Ctrl+Z để hoàn tác.")
+        tab.view.begin_placement(pil_to_qimage(img), commit, width_pt=w + 2 * m, label="Con dấu", page=page,
+                                 center_pt=center)
+        pl = tab.view.placement
+        if pl is not None:
+            pl.rotatable = True
+            pl.angle = angle % 360
+            pl.keep_ratio = spec.get("shape") == "circle"
+            pl.on_dblclick = lambda _pl: tab.view.commit_placement()
+            pl.hint = ("Con dấu · kéo tới chỗ bất kỳ, kéo / bấm sang trang khác để chuyển · kéo góc đổi cỡ · "
+                       "núm tròn xoay · Enter hoặc nháy đúp: đóng dấu · Esc: bỏ")
+
+    def _edit_stamp_selected(self):
+        """Nháy đúp lên con dấu đang chọn -> mở lại hộp thoại để sửa chữ, hình dạng, màu, cỡ, góc."""
+        from . import items
+        from .stamp_dialog import StampDialog
+        from .ui_edit import pil_to_qimage
+        ctx = getattr(self, "_sel", None)
+        tab = self.current()
+        if not ctx or not tab or tab.view.placement is None:
+            return
+        pl = tab.view.placement
+        r = pl.rect
+        cur = self._spec_from_frame(ctx, (r.left(), r.top(), r.right(), r.bottom()), pl.angle)
+        dlg = StampDialog(self, self.settings, spec=cur)
+        if dlg.exec() != StampDialog.Accepted or tab.view.placement is not pl:
+            return
+        x0, y0, x1, y1 = items.spec_rect(cur)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        new = dlg.spec()
+        nx0, ny0, nx1, ny1 = items.spec_rect(new)
+        nw, nh = nx1 - nx0, ny1 - ny0
+        new.update(id=cur["id"], rect=[cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2])
+        if cur.get("z"):
+            new["z"] = cur["z"]
+        dlg.remember()
+        img, m = items.render_preview(new)
+        b = items.display_bounds(new)
+        frame = (b[0] - m, b[1] - m, b[2] + m, b[3] + m)
+        ctx.update(spec=new, m=m, frame=frame, force=True)
+        pl.angle = float(new.get("angle", 0) or 0)
+        pl.keep_ratio = items.keep_ratio(new)
+        tab.view.replace_placement_image(pil_to_qimage(img), QRectF(frame[0], frame[1], frame[2] - frame[0],
+                                                                   frame[3] - frame[1]))
+        self.tool_opts.show_item(new, "Con dấu")
 
     def batch_sign(self, files=None):
         from . import signing

@@ -26,7 +26,7 @@ class SliderSpin(QWidget):
         self.spin.setKeyboardTracking(False)        # gõ xong (Enter / rời ô) mới áp dụng
         self.spin.setAccelerated(True)
         self.spin.setAlignment(Qt.AlignRight)
-        self.spin.setFixedWidth(80 if maximum < 1000 else 90)
+        self.spin.setFixedWidth(80 if maximum < 1000 and len(suffix) <= 2 else 96)
         if tooltip:
             self.slider.setToolTip(tooltip)
             self.spin.setToolTip(tooltip + " – gõ số rồi Enter")

@@ -644,6 +644,134 @@ def shape_text_spec(spec) -> dict | None:
     return t
 
 
+# ------------------------------------------------------------------ 1.0.22: con dấu chữ tùy biến
+STAMP_PRESETS = ["ĐÃ DUYỆT", "SAO Y BẢN CHÍNH", "BẢN SAO", "BẢN CHÍNH", "ĐÃ KIỂM TRA", "ĐÃ NHẬN", "ĐÃ THANH TOÁN",
+                 "MẬT", "KHẨN", "HỎA TỐC", "NHÁP", "HỦY", "LƯU HÀNH NỘI BỘ"]
+STAMP_SHAPES = [("rect", "Chữ nhật"), ("roundrect", "Chữ nhật bo góc"), ("ellipse", "Bầu dục"),
+                ("circle", "Tròn (chữ chạy vòng)"), ("hexagon", "Lục giác"), ("none", "Không khung (chỉ chữ)")]
+STAMP_BORDERS = [("single", "Viền đơn"), ("double", "Viền đôi"), ("thick", "Viền đậm")]
+STAMP_FONTS = [("sans", "Không chân, đậm"), ("serif", "Có chân, đậm (Times)")]
+
+
+def stamp_spec(text: str = "ĐÃ DUYỆT", shape: str = "rect", rect=(0, 0, 150, 50), **kw) -> dict:
+    s = {"kind": "stamp", "text": text, "shape": shape, "rect": list(rect), "angle": 0, "border": "double",
+         "color": "#d32f2f", "opacity": 100, "sub": "", "arc": "", "family": "sans"}
+    s.update({k: v for k, v in kw.items() if v is not None})
+    return s
+
+
+def stamp_font(spec) -> str:
+    return fonts.system_font(spec.get("family") or "sans", bold=True)
+
+
+def _stamp_line_w(spec, w, h) -> float:
+    base = max(0.8, min(w, h) * 0.035)
+    return base * (1.9 if spec.get("border") == "thick" else 1.0)
+
+
+def stamp_layout(spec):
+    """Bố cục con dấu (toạ độ trong khung, gốc trên-trái):
+    {"paths": [(subpaths, ox, oy, nét)], "lines": [(chữ, cỡ, x, y_baseline)], "arc": [(ký tự, cỡ, x, y, góc)]}."""
+    x0, y0, x1, y1 = spec_rect(spec)
+    w, h = max(4.0, x1 - x0), max(4.0, y1 - y0)
+    shape = spec.get("shape", "rect")
+    fp = stamp_font(spec)
+    asc, desc = fonts.metrics(fp)
+    lw = _stamp_line_w(spec, w, h)
+    out = {"paths": [], "lines": [], "arc": [], "lw": lw}
+    if shape != "none":
+        sh = "ellipse" if shape == "circle" else shape
+        out["paths"].append((shape_paths(sh, w - lw, h - lw), lw / 2, lw / 2, lw))
+        if spec.get("border", "double") == "double":
+            t = lw * 2.6
+            out["paths"].append((shape_paths(sh, w - 2 * t, h - 2 * t), t, t, max(0.5, lw * 0.45)))
+    # vùng chữ bên trong
+    inset = {"ellipse": 0.15, "circle": 0.15, "hexagon": 0.12, "roundrect": 0.04}.get(shape, 0.0)
+    pad = (lw * 3.6 if spec.get("border", "double") == "double" else lw * 2.2) if shape != "none" else 0.0
+    bx0, by0 = pad + w * inset / 2, pad + h * inset / 2
+    bw, bh = max(2.0, w - 2 * bx0), max(2.0, h - 2 * by0)
+    arc = (spec.get("arc") or "").strip() if shape == "circle" else ""
+    if arc:                                          # chữ chạy vòng phía trên + vòng trong ngăn cách
+        R = min(w, h) / 2
+        cx, cy = w / 2, h / 2
+        r_in = R * 0.58
+        out["paths"].append(([_ellipse(cx - r_in, cy - r_in, cx + r_in, cy + r_in)], 0, 0, max(0.5, lw * 0.6)))
+        top = R - pad - lw * 0.3                          # mép ngoài của chữ (trong viền)
+        band = top - r_in - lw * 0.8
+        fs = max(2.0, min(R * 0.2, band / (asc + 0.1)))
+        base = top - asc * fs
+        for _ in range(12):
+            total = sum(fonts.measure(fp, ch, fs) for ch in arc) + fs * 0.12 * (len(arc) - 1)
+            span = total / max(1.0, base)
+            if span <= math.radians(300):
+                break
+            fs *= 0.92
+            base = top - asc * fs
+        a = -math.pi / 2 - span / 2
+        for ch in arc:
+            adv = fonts.measure(fp, ch, fs)
+            mid = a + (adv / 2) / base
+            out["arc"].append((ch, fs, cx + base * math.cos(mid), cy + base * math.sin(mid), mid))
+            a += (adv + fs * 0.12) / base
+        k = r_in * 0.78
+        bx0, by0, bw, bh = cx - k, cy - k * 0.8, 2 * k, 1.6 * k
+    lines = [ln for ln in (spec.get("text") or "").split("\n") if ln.strip()]
+    sub = [ln for ln in (spec.get("sub") or "").split("\n") if ln.strip()]
+    if not lines and not sub:
+        return out
+    ratio = 0.5                                       # cỡ dòng phụ so với dòng chính
+    gap = 1.12
+    units = len(lines) * (asc + desc) * gap + len(sub) * (asc + desc) * gap * ratio
+    fs = bh / max(0.1, units)
+    for ln in lines:
+        fs = min(fs, bw / max(1e-3, fonts.measure(fp, ln, 1.0)))
+    for ln in sub:
+        fs = min(fs, bw / max(1e-3, fonts.measure(fp, ln, ratio)))
+    fs = max(2.0, fs * 0.98)
+    rows = [(ln, fs) for ln in lines] + [(ln, fs * ratio) for ln in sub]
+    total = sum((asc + desc) * s * gap for _, s in rows)
+    y = by0 + (bh - total) / 2
+    for ln, s in rows:
+        lh = (asc + desc) * s * gap
+        x = bx0 + (bw - fonts.measure(fp, ln, s)) / 2
+        out["lines"].append((ln, s, x, y + (lh - (asc + desc) * s) / 2 + asc * s))
+        y += lh
+    return out
+
+
+def _stamp_objs(doc, fr, spec):
+    x0, y0, x1, y1 = spec_rect(spec)
+    col = _col(spec.get("color", "#d32f2f"), spec.get("opacity", 100))
+    lay = stamp_layout(spec)
+    objs = []
+    for subpaths, ox, oy, lw in lay["paths"]:
+        objs.append(_apply_style(_path_obj(fr, subpaths, x0 + ox, y0 + oy), col, lw, None, cap="round"))
+    chars = "".join(sorted({c for ln, *_ in lay["lines"] for c in ln} | {c for c, *_ in lay["arc"]} - {" "}))
+    if not chars:
+        return objs
+    fp = stamp_font(spec)
+    miss = fonts.missing_chars(fp, chars)
+    if miss:
+        raise ValueError(f"Phông chữ không có ký tự: {miss}")
+    font = _load_font(doc, fonts.subset(fp, chars))
+    try:
+        for ln, s, x, yb in lay["lines"]:
+            objs.append(_text_obj(doc, font, s, ln, fr.matrix_at(x0 + x, y0 + yb), col))
+        for ch, s, cx, cy, a in lay["arc"]:
+            if ch == " ":
+                continue
+            ux, uy = math.cos(a), math.sin(a)             # "lên" của chữ = hướng ra ngoài vòng tròn
+            dx, dy = -uy, ux                              # hướng dòng chữ = tiếp tuyến chiều kim đồng hồ
+            adv = fonts.measure(fp, ch, s)
+            ox, oy = fr.u(x0 + cx - dx * adv / 2, y0 + cy - dy * adv / 2)
+            m = C.FS_MATRIX(dx * fr.ex[0] + dy * fr.ey[0], dx * fr.ex[1] + dy * fr.ey[1],
+                            ux * fr.ex[0] + uy * fr.ey[0], ux * fr.ex[1] + uy * fr.ey[1], ox, oy)
+            objs.append(_text_obj(doc, font, s, ch, m, col))
+    finally:
+        C.FPDFFont_Close(font)
+    return objs
+
+
 def build_objects(doc, i: int, spec: dict) -> list:
     """Dựng các đối tượng PDF (chưa chèn vào trang) của một nội dung."""
     fr = _Frame(doc, i)
@@ -658,6 +786,8 @@ def build_objects(doc, i: int, spec: dict) -> list:
         objs = _ink_objs(fr, spec)
     elif kind == "text":
         objs = _text_objs(doc, fr, spec)
+    elif kind == "stamp":
+        objs = _stamp_objs(doc, fr, spec)
     else:
         raise ValueError(kind)
     angle = float(spec.get("angle", 0) or 0)
@@ -758,6 +888,8 @@ class Item:
             return "Hộp chữ"
         if k == "ink":
             return dict(PENS).get(self.spec.get("pen", "ball"), "Nét vẽ tay")
+        if k == "stamp":
+            return "Con dấu"
         return SHAPE_LABEL.get(self.spec.get("shape", ""), "Hình vẽ")
 
 
@@ -1018,6 +1150,8 @@ def resized(spec, new_rect):
 
 
 def keep_ratio(spec) -> bool:
+    if spec["kind"] == "stamp":
+        return spec.get("shape") == "circle"
     if spec["kind"] == "text":
         return True
     if spec["kind"] == "shape" and spec.get("shape") in SYMBOL_SHAPES | {"check", "cross"}:

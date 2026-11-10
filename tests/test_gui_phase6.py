@@ -149,9 +149,14 @@ def test_compare_flow(win, qapp, tmp_path, monkeypatch):
 
 def test_stamp_text_flow(win, qapp, tmp_path, monkeypatch):
     tab = _open(win, qapp, _contract(3), tmp_path)
-    monkeypatch.setattr(ui_tools.StampTextDialog, "exec",
-                        lambda self: (self.cb_text.setCurrentText("MẬT"), QDialog.Accepted)[1])
+    def fake(self):
+        self.cb_text.setCurrentText("MẬT")
+        self.cb_scope.setCurrentIndex(self.cb_scope.findData("all"))
+        return QDialog.Accepted
+    monkeypatch.setattr(ui_tools.StampTextDialog, "exec", fake)
     win.run("stamptext")
+    assert tab.view.placement is not None          # dấu nổi trên trang, chưa đóng
+    tab.view.commit_placement()
     assert all("MẬT" in tab.doc.text(i) for i in range(3))
 
 

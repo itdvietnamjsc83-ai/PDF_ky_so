@@ -227,6 +227,8 @@ class Placement:
         self.guides = []               # đường gióng đang hiện khi kéo [("x"|"y", giá trị pt)]
         self.moved = False
         self.hint = ""
+        self.cross_page = True         # kéo khung sang trang khác (đặt mới; sửa: chỉ khi nơi gọi xử lý được trang mới)
+        self.grab = None               # điểm nắm khi bắt đầu kéo (pt, so với góc trên-trái khung)
 
 
 DRAG_TOOLS = {"rect", "ellipse", "line", "arrow", "highlight", "erase", "textbox", "handarea", "shape", "scanedit"}
@@ -750,6 +752,7 @@ class PageView(QScrollArea):
         pl = Placement(image, page, QRectF(x0, y0, x1 - x0, y1 - y0), on_commit, label, on_delete, on_cancel,
                        keep_ratio)
         pl.angle, pl.rotatable, pl.resizable, pl.commit_outside = float(angle or 0), rotatable, resizable, commit_outside
+        pl.cross_page = False
         self.placement = pl
         self.setFocus()
         self.canvas.setCursor(Qt.SizeAllCursor)
@@ -936,6 +939,9 @@ class PageView(QScrollArea):
             pl.drag = ("resize", pos, QRectF(pl.rect), hit, pl.angle)
         elif hit == "move":
             pl.drag = ("move", pos, QRectF(pl.rect), None, pl.angle)
+            r = self._rects[pl.page]
+            pl.grab = ((pos.x() - r.left()) / self.scale - pl.rect.left(),
+                       (pos.y() - r.top()) / self.scale - pl.rect.top())
         elif pl.cancel_outside:
             self.cancel_placement()
             return False
@@ -990,6 +996,14 @@ class PageView(QScrollArea):
         shift = bool(_mods(ev) & Qt.ShiftModifier)
         if kind == "move":
             pl.rect = orig.translated(dx, dy)
+            if pl.cross_page and pl.grab is not None:      # kéo sang trang khác: khung theo chuột sang trang đó
+                for i, r in enumerate(self._rects):
+                    if i != pl.page and r.contains(pos):
+                        pl.page = i
+                        break
+                r = self._rects[pl.page]
+                pl.rect = QRectF((pos.x() - r.left()) / s - pl.grab[0], (pos.y() - r.top()) / s - pl.grab[1],
+                                 orig.width(), orig.height())
             self._snap_move()
         elif kind == "rotate":
             sr = self._placement_screen_rect()

@@ -269,51 +269,7 @@ class CompressDialog(QDialog):
 
 
 # ------------------------------------------------------------------ dấu chữ
-class StampTextDialog(QDialog):
-    def __init__(self, parent, has_selection: bool = False):
-        super().__init__(parent)
-        from .tools import STAMP_TEXTS
-        self.setWindowTitle("Dấu chữ")
-        v = QVBoxLayout(self)
-        f = QFormLayout()
-        self.cb_text = QComboBox(editable=True)
-        self.cb_text.addItems(STAMP_TEXTS)
-        f.addRow("Nội dung:", self.cb_text)
-        self.cb_style = QComboBox()
-        self.cb_style.addItem("Khung như con dấu", "box")
-        self.cb_style.addItem("Chữ lớn chéo trang, mờ (watermark)", "watermark")
-        f.addRow("Kiểu:", self.cb_style)
-        self.cb_pos = QComboBox()
-        for t, k in (("Góc trên phải", "top-right"), ("Góc trên trái", "top-left"), ("Góc dưới phải", "bottom-right"),
-                     ("Góc dưới trái", "bottom-left"), ("Giữa trang", "center")):
-            self.cb_pos.addItem(t, k)
-        f.addRow("Vị trí:", self.cb_pos)
-        self.cb_color = QComboBox()
-        for t, c in (("Đỏ", "#d32f2f"), ("Xanh", "#0d47a1"), ("Đen", "#1b1b1b"), ("Xám", "#757575")):
-            self.cb_color.addItem(t, c)
-        f.addRow("Màu:", self.cb_color)
-        from .widgets import SliderSpin
-        self.sl_op = SliderSpin(10, 60, 25)
-        f.addRow("Độ đậm (watermark):", self.sl_op)
-        self.cb_scope = QComboBox()
-        self.cb_scope.addItem("Tất cả các trang", "all")
-        self.cb_scope.addItem("Trang hiện tại", "current")
-        if has_selection:
-            self.cb_scope.addItem("Các trang đang chọn", "selected")
-        f.addRow("Đóng lên:", self.cb_scope)
-        v.addLayout(f)
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(lambda: self.cb_text.currentText().strip() and self.accept())
-        bb.rejected.connect(self.reject)
-        v.addWidget(bb)
-        self.cb_style.currentIndexChanged.connect(lambda: (self.cb_pos.setEnabled(self.cb_style.currentData() == "box"),
-                                                           self.sl_op.setEnabled(self.cb_style.currentData() != "box")))
-        self.sl_op.setEnabled(False)
-
-    def values(self) -> dict:
-        return {"text": self.cb_text.currentText().strip(), "style": self.cb_style.currentData(),
-                "position": self.cb_pos.currentData(), "color": self.cb_color.currentData(),
-                "opacity": self.sl_op.value() / 100, "scope": self.cb_scope.currentData()}
+from .stamp_dialog import StampDialog as StampTextDialog  # noqa: E402  (1.0.22: con dấu tùy biến)
 
 
 # ------------------------------------------------------------------ so sánh
