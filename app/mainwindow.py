@@ -2391,6 +2391,15 @@ class MainWindow(QMainWindow):
         if kind == "tray":
             self.show_tray().add_paths([path])
             self._flash("Đã nhận bản in vào khay ghép" + (f" ({report})." if report else "."))
+        elif kind == "open":                 # 1.0.22: máy in "PDF Ky so - Mo file": chỉ mở thành PDF, không ký
+            self.open_files([path])
+            self.raise_()
+            self.activateWindow()
+            tab = self.current()
+            if tab:
+                tab.from_spool = True
+            self._flash("Đã mở bản in thành PDF" + (f" ({report})" if report else "") +
+                        " – bấm Lưu (Ctrl+S) để chọn nơi lưu.")
         else:
             self.open_files([path])
             self.mode_group.button(3).click()
@@ -4842,20 +4851,14 @@ class MainWindow(QMainWindow):
         return out
 
     def print_doc(self, tab: DocTab):
-        from PySide6.QtPrintSupport import QPrintDialog, QPrinter  # nạp khi cần -> khởi động nhanh
-        from .printing import print_pages
+        """1.0.22: hộp thoại In riêng – xem trước, tỉ lệ %, nhiều trang/tờ, khổ giấy, đen trắng… (kiểu Foxit)."""
+        from .print_dialog import PrintDialog
         if not tab.doc.can_print:
             QMessageBox.information(self, APP_NAME, "Người gửi tài liệu này không cho phép in.")
             return
-        printer = QPrinter(QPrinter.HighResolution)
-        dlg = QPrintDialog(printer, self)
-        dlg.setMinMax(1, tab.doc.page_count)
-        if dlg.exec() != QPrintDialog.Accepted:
-            return
-        first = max(printer.fromPage(), 1) - 1
-        last = (printer.toPage() or tab.doc.page_count) - 1
-        notes_on = str(self.settings.value("print/notes", "false")).lower() == "true"      # 12e
-        print_pages(tab.doc, printer, first, last, notes=notes_on)
+        dlg = PrintDialog(self, tab.doc, tab.view.current_page(), self.settings, getattr(tab, "title", None) or "")
+        if dlg.exec() == PrintDialog.Accepted:
+            self._flash(f"Đã gửi {getattr(dlg, 'printed', 0)} tờ tới máy in.")
 
     def goto_page(self):
         """Ctrl+G: con trỏ nhảy vào ô số trang ở thanh dưới, gõ số rồi Enter."""

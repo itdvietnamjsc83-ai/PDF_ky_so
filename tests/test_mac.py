@@ -75,7 +75,7 @@ def test_pdf_services_install_idempotent(monkeypatch, tmp_path):
     monkeypatch.setattr(macintegration, "services_dir", lambda: str(tmp_path / "PDF Services"))
     spool = tmp_path / "spool"
     made = macintegration.install_pdf_services(str(spool))
-    assert len(made) == 2
+    assert len(made) == len(macintegration.SERVICES) == 3
     for kind, title in macintegration.SERVICES.items():
         p = tmp_path / "PDF Services" / title
         s = p.read_text(encoding="utf-8")

@@ -26,13 +26,13 @@ def spool_root() -> str:
 
 
 class SpoolWatcher(QObject):
-    fileArrived = Signal(str, str)        # (loại: "tray" | "sign", đường dẫn file đã nhận)
+    fileArrived = Signal(str, str)        # (loại: "tray" | "sign" | "open", đường dẫn file đã nhận)
 
     def __init__(self, root: str | None = None, parent=None):
         super().__init__(parent)
         self.root = root or spool_root()
         self.inbox = os.path.join(self.root, "inbox")
-        self.dirs = {k: os.path.join(self.root, k) for k in ("tray", "sign")}
+        self.dirs = {k: os.path.join(self.root, k) for k in ("tray", "sign", "open")}
         for d in list(self.dirs.values()) + [self.inbox]:
             os.makedirs(d, exist_ok=True)
         self._watch = QFileSystemWatcher(list(self.dirs.values()), self)

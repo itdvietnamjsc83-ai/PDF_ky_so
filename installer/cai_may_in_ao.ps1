@@ -1,5 +1,6 @@
-﻿# Tạo 2 máy in ảo cho phần mềm (chạy bằng quyền Administrator; bộ cài gọi tự động).
+﻿# Tạo 3 máy in ảo cho phần mềm (chạy bằng quyền Administrator; bộ cài gọi tự động).
 #   "PDF Ky so"     -> in xong tự mở phần mềm ở chế độ ký số
+#   "PDF Ky so - Mo file" -> in xong chỉ mở thành file PDF trong phần mềm (không ký)
 #   "PDF Khay ghep" -> in xong tự xếp vào cuối khay ghép
 # Dùng driver "Microsoft Print to PDF" có sẵn trên Windows 10/11. Cổng máy in là file trong thư mục chung
 # C:\ProgramData\PdfKySo\spool (cấp quyền sửa cho nhóm Users) -> đúng cho mọi tài khoản trên máy.
@@ -7,6 +8,7 @@ param([string]$Root = (Join-Path $env:ProgramData "PdfKySo\spool"))
 $ErrorActionPreference = "Stop"
 $printers = @(
   @{ Name = "PDF Ky so";     Dir = "sign" },
+  @{ Name = "PDF Ky so - Mo file"; Dir = "open" },
   @{ Name = "PDF Khay ghep"; Dir = "tray" }
 )
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "inbox") | Out-Null

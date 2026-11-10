@@ -15,7 +15,7 @@ FEATURES: dict[str, int] = {
     # --- Chuyên nghiệp ---
     "digisign": PRO,            # Ký số bằng USB token (từng file)
     "mergesign": PRO,           # Ghép + ký
-    "spool": PRO,               # Máy in ảo "PDF Ky so" / "PDF Khay ghep"
+    "spool": PRO,               # Máy in ảo "PDF Ky so" / "PDF Ky so - Mo file" / "PDF Khay ghep"
     "tray": PRO, "trayadd": PRO, "traytabs": PRO, "merge": PRO,       # Khay ghép
     "colormode": PRO,           # Chữ đen / Xám / Đen trắng
     "protect": PRO, "password": PRO, "printperm": PRO, "presets": PRO,  # Bảo vệ file
@@ -78,7 +78,7 @@ COMPARE = [
     ("Ghi chú, hộp chữ, hình vẽ, bút, tẩy", STANDARD),
     ("Sửa chữ có sẵn, tìm & thay, sửa trang scan", STANDARD),
     ("Ký số bằng USB token (từng file)", PRO),
-    ("Máy in ảo \"PDF Ky so\" / \"PDF Khay ghep\"", PRO),
+    ("Máy in ảo \"PDF Ky so\" / \"Mo file\" / \"PDF Khay ghep\"", PRO),
     ("Khay ghép", PRO),
     ("Chuyển Chữ đen / Xám / Như máy in đen trắng / Đen trắng", PRO),
     ("Bảo vệ file (mật khẩu, cấm in/sửa, in bản mờ), nén PDF, so sánh 2 bản", PRO),

@@ -140,7 +140,8 @@ def find_libreoffice() -> str | None:
 
 
 # ------------------------------------------------------------------ PDF Services (máy in ảo kiểu Mac)
-SERVICES = {"sign": "Mở bằng PDF Ký Số", "tray": "Thêm vào Khay ghép PDF Ký Số"}
+SERVICES = {"sign": "Mở bằng PDF Ký Số", "open": "Chỉ chuyển thành PDF trong PDF Ký Số",
+            "tray": "Thêm vào Khay ghép PDF Ký Số"}
 
 _SERVICE_SH = '''#!/bin/sh
 # macOS PDF Services: $1 = tên tài liệu, $2 = tùy chọn, $3 = đường dẫn file PDF vừa in
@@ -158,7 +159,7 @@ def services_dir() -> str:
 
 
 def install_pdf_services(spool_root: str | None = None) -> list[str]:
-    """Tạo 2 mục trong nút PDF ▾ của hộp thoại In (mọi ứng dụng). Gọi lại nhiều lần không sao."""
+    """Tạo 3 mục trong nút PDF ▾ của hộp thoại In (mọi ứng dụng). Gọi lại nhiều lần không sao."""
     from .spool import spool_root as _root
     root = spool_root or _root()
     out = []
