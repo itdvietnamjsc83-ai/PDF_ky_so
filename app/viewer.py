@@ -1136,10 +1136,12 @@ class PageView(QScrollArea):
 
     # ---------- sửa chữ tại chỗ ----------
     def begin_inline_text(self, page: int, rect, text: str, family: str, size_pt: float, color: str, on_done,
-                          align: str = "left", caret=None, bold: bool = False, italic: bool = False, bar=None):
+                          align: str = "left", caret=None, bold: bool = False, italic: bool = False, bar=None,
+                          grow_right: float | None = None):
         """Ô nhập chữ phủ đúng chỗ hộp chữ: gõ sửa trực tiếp trên trang.
         caret=(x, y) pt: đặt con trỏ nhấp nháy đúng chỗ vừa bấm (như Word) thay vì chọn hết chữ.
-        on_done(chữ_mới | None). Ctrl+Enter hoặc bấm ra ngoài: xong · Esc: hủy."""
+        on_done(chữ_mới | None). Ctrl+Enter hoặc bấm ra ngoài: xong · Esc: hủy.
+        grow_right (pt): sửa 1 dòng – không tự xuống dòng, ô gõ kéo dài sang phải tới mép này khi gõ thêm."""
         from PySide6.QtWidgets import QPlainTextEdit
         self._finish_inline()
         x0, y0, x1, y1 = rect
@@ -1154,7 +1156,16 @@ class PageView(QScrollArea):
         w = max(40.0, (x1 - x0) * s) + 4
         ed.setGeometry(int(r.left() + x0 * s) - 2, int(r.top() + y0 * s) - 2, int(w), int(max(20, (y1 - y0) * s) + 6))
 
+        if grow_right is not None:
+            ed.setLineWrapMode(QPlainTextEdit.NoWrap)
+        w_min = int(w)
+        w_max = int(max(w, (float(grow_right) - x0) * s + 4)) if grow_right is not None else int(w)
+
         def grow():
+            if grow_right is not None:              # 1 dòng: kéo dài sang phải, giữ nguyên cỡ chữ
+                fm = ed.fontMetrics()
+                need = max(fm.horizontalAdvance(t) for t in (ed.toPlainText().split("\n") or [""])) + 8
+                ed.setFixedWidth(int(min(max(w_min, need), max(w_min, w_max + 40))))
             doc_h = ed.document().size().height() * ed.fontMetrics().lineSpacing() + 8
             ed.setFixedHeight(int(max(doc_h, 20)))
             self._place_inline_bar()

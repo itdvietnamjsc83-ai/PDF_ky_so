@@ -2535,7 +2535,7 @@ class MainWindow(QMainWindow):
         if size_flag:
             o.lbl_size.setText("Cỡ ký hiệu:" if kind in self.SYMBOL_KINDS else
                                ("Cỡ cục tẩy:" if kind == "inkerase" else
-                                ("Cỡ (0: giữ):" if kind == "edittext" else "Cỡ chữ:")))
+                                "Cỡ chữ:"))
         if kind == "edittext":
             o._quiet = True
             o.sp_size.setMinimum(0)
@@ -2952,9 +2952,23 @@ class MainWindow(QMainWindow):
 
         col0 = getattr(o, "_edit_color", None)
 
+        # 1.0.22: ô cỡ chữ (bảng phải + thanh nổi) hiện đúng cỡ gốc của dòng đang sửa thay vì 0
+        o._quiet = True
+        try:
+            o.sp_size.setValue(float(run.size))
+        finally:
+            o._quiet = False
+        if run.orig_size and abs(run.orig_size - run.size) > 0.05:
+            self._flash(f"Dòng này đã đổi cỡ chữ: hiện {run.size:g} pt, cỡ gốc {run.orig_size:g} pt "
+                        "(bấm ↺ trên thanh định dạng để về cỡ gốc).")
+
+        def chosen_size():
+            v = o.sp_size.value()
+            return v if v and abs(v - run.size) > 0.05 else None
+
         def done(text):
             restyled = bool(o.cb_family.currentData() or o.btn_bold.isChecked() or o.btn_italic.isChecked()
-                            or o.sp_size.value() or getattr(o, "_edit_color", None) != col0)
+                            or chosen_size() or getattr(o, "_edit_color", None) != col0)
             if text is None or (text.replace("\n", " ").strip() == old.strip() and not restyled):
                 tab.view.canvas.update()
                 return
@@ -2968,7 +2982,7 @@ class MainWindow(QMainWindow):
                 if src == "family" and src0 != "family":
                     self._flash_later = ("Phông gốc trong file thiếu ký tự vừa gõ – đã dùng phông gần giống nhất "
                                          "trên máy.")
-            size = o.sp_size.value() or None
+            size = chosen_size()
             col = getattr(o, "_edit_color", None)
             try:
                 info = editing.replace_group(doc, page, lines, text, fp, size, col, fit=o.chk_fit.isChecked())
@@ -2977,9 +2991,11 @@ class MainWindow(QMainWindow):
                 return
             msg = "Đã sửa chữ."
             if info["shrunk"]:
-                msg += f" Chữ mới dài hơn nên đã co còn cỡ {info['size']:g} pt cho vừa chỗ cũ."
+                msg += f" Dòng quá dài nên đã co chữ hẹp lại và còn cỡ {info['size']:g} pt cho vừa 1 dòng."
+            elif info.get("condensed"):
+                msg += " Gần hết chỗ bên phải nên đã co chữ hẹp lại một chút cho vừa 1 dòng (giữ nguyên cỡ chữ)."
             if info["overflow"]:
-                msg += " ⚠ Chữ vẫn dài hơn chỗ cũ (có thể đè lên chữ bên cạnh) – nên rút gọn lại."
+                msg += " ⚠ Chữ vẫn dài hơn chỗ trống (có thể đè lên chữ bên cạnh) – nên rút gọn lại."
             extra = getattr(self, "_flash_later", None)
             self._flash_later = None
             self._flash(msg + (" " + extra if extra else "") + " Ctrl+Z để hoàn tác.")
@@ -2989,9 +3005,11 @@ class MainWindow(QMainWindow):
         self._edit_color_seen = o.color
         self._edit_base = {"family": qt_family(fp0), "size": run.size, "color": color,
                            "bold": bool(run.bold), "italic": bool(run.italic)}
+        # 1 dòng: ô gõ không tự xuống dòng mà kéo dài sang phải tới chữ kế tiếp / lề phải trang (giữ cỡ chữ)
+        room = editing.line_room(doc, page, lines, runs) if len(lines) == 1 else None
         tab.view.begin_inline_text(page, rect, old, qt_family(fp0), run.size, color, done, caret=(x, y),
-                                   bold=False, italic=False, bar=self._edit_fmtbar(tab, run))
-        if any((o.cb_family.currentData(), o.btn_bold.isChecked(), o.btn_italic.isChecked(), o.sp_size.value())):
+                                   bold=False, italic=False, bar=self._edit_fmtbar(tab, run), grow_right=room)
+        if any((o.cb_family.currentData(), o.btn_bold.isChecked(), o.btn_italic.isChecked(), chosen_size())):
             self._restyle_inline(tab)
         return False
 
@@ -3386,6 +3404,7 @@ class MainWindow(QMainWindow):
         bar.set_state({"family": o.cb_family.currentData() or "", "size": o.sp_size.value(),
                        "bold": o.btn_bold.isChecked(), "italic": o.btn_italic.isChecked(),
                        "color": getattr(o, "_edit_color", None) or "#%02x%02x%02x" % tuple(run.color[:3])})
+        bar.set_orig_size(run.orig_size or run.size)            # nút ↺ về cỡ gốc (nhớ cả sau khi lưu file)
         base_col = bar.state()["color"]
 
         def changed(st):

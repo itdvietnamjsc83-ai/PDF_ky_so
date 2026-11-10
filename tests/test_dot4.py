@@ -37,11 +37,35 @@ def test_line_and_paragraph_replace():
     assert t.count("Điều khoản thỏa thuận") < 10
 
 
-def test_line_replace_shrinks_long_text():
+def test_line_replace_keeps_size_when_room_right():
+    """1.0.22: gõ thêm chữ – còn chỗ bên phải trang thì giữ nguyên cỡ chữ, dòng kéo dài sang phải."""
     d = PdfDocument(data=_contract(1))
     runs = editing.text_runs(d, 0)
     info = editing.replace_group(d, 0, [editing.line_of(runs, runs[1])], "Dòng mới dài hơn hẳn dòng cũ một chút")
-    assert info["shrunk"] and info["size"] < 11
+    assert info["extended"] and not info["shrunk"] and not info["condensed"] and info["size"] == 11
+    new = next(r for r in editing.text_runs(d, 0) if r.text.startswith("Dòng mới"))
+    assert abs(new.size - 11) < 0.2 and new.rect[2] > 274          # dài hơn chỗ cũ, cùng cỡ
+
+
+def test_line_replace_condenses_to_fit_one_line():
+    """Hết chỗ bên phải: co chữ hẹp lại (giữ chiều cao, cỡ chữ) cho vừa đúng 1 dòng tới lề phải."""
+    d = PdfDocument(data=_contract(1))
+    runs = editing.text_runs(d, 0)
+    line = [editing.line_of(runs, runs[1])]
+    room = editing.line_room(d, 0, line, runs)
+    assert 500 < room < 530                                         # lề phải trang ~ lề trái
+    text = "Điều khoản thỏa thuận giữa hai bên được bổ sung thêm nội dung chi tiết cho đủ ý kiến"
+    info = editing.replace_group(d, 0, line, text)
+    assert info["condensed"] and not info["shrunk"] and info["size"] == 11 and 0.8 <= info["hscale"] < 1
+    new = next(r for r in editing.text_runs(d, 0) if r.text.startswith("Điều khoản thỏa thuận giữa hai bên được"))
+    assert new.rect[2] <= room + 2 and new.rect[3] - new.rect[1] > 8   # vừa 1 dòng, chữ không thấp đi
+
+
+def test_line_replace_too_long_shrinks_last():
+    d = PdfDocument(data=_contract(1))
+    runs = editing.text_runs(d, 0)
+    info = editing.replace_group(d, 0, [editing.line_of(runs, runs[1])], "Dòng rất dài " * 12)
+    assert info["condensed"] and info["shrunk"] and info["size"] < 11 and info["hscale"] == 0.8
 
 
 def test_styled_font_bold_italic():

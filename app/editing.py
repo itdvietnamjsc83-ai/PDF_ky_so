@@ -57,10 +57,12 @@ class _Frame:
     def u(self, x: float, y: float) -> tuple[float, float]:
         return (self.o[0] + x * self.ex[0] + y * self.ey[0], self.o[1] + x * self.ex[1] + y * self.ey[1])
 
-    def matrix_at(self, x: float, y: float, scale: float = 1.0):
-        """Ma trận đặt chữ/ảnh đứng thẳng khi nhìn trên màn hình, gốc tại (x, y)."""
+    def matrix_at(self, x: float, y: float, scale: float = 1.0, hscale: float = 1.0):
+        """Ma trận đặt chữ/ảnh đứng thẳng khi nhìn trên màn hình, gốc tại (x, y).
+        hscale < 1: co ngang (chữ hẹp lại, giữ nguyên chiều cao)."""
         ox, oy = self.u(x, y)
-        return C.FS_MATRIX(self.ex[0] * scale, self.ex[1] * scale, -self.ey[0] * scale, -self.ey[1] * scale, ox, oy)
+        hs = scale * hscale
+        return C.FS_MATRIX(self.ex[0] * hs, self.ex[1] * hs, -self.ey[0] * scale, -self.ey[1] * scale, ox, oy)
 
     def display_rect(self, left, bottom, right, top):
         """Khung PDF -> khung hiển thị (x0, y0, x1, y1)."""
@@ -387,6 +389,7 @@ class TextRun:
     color: tuple
     rect: tuple                  # khung hiển thị (x0, y0, x1, y1)
     raw: object = None
+    orig_size: float | None = None   # 1.0.22: cỡ chữ gốc trước lần sửa đầu tiên (ghi trong file)
 
 
 def _obj_text(obj, tp_raw) -> str:
@@ -417,6 +420,45 @@ def _font_info(obj):
     return name, False, False
 
 
+ORIG_MARK = b"PdfKySoGoc"          # dấu đánh dấu nội dung (marked content) ghi cỡ chữ gốc vào chữ đã sửa
+
+
+def _get_orig_size(obj) -> float | None:
+    try:
+        for k in range(C.FPDFPageObj_CountMarks(obj)):
+            mk = C.FPDFPageObj_GetMark(obj, k)
+            buf = (ctypes.c_ushort * 32)()
+            n = ctypes.c_ulong(0)
+            C.FPDFPageObjMark_GetName(mk, buf, 64, ctypes.byref(n))
+            if bytes(buf)[:max(0, n.value - 2)].decode("utf-16-le", "ignore").encode() != ORIG_MARK:
+                continue
+            v = ctypes.c_float(0)
+            if C.FPDFPageObjMark_GetParamFloatValue(mk, b"Size", ctypes.byref(v)) and v.value > 0:
+                return nice_size(v.value)
+            iv = ctypes.c_int(0)
+            if C.FPDFPageObjMark_GetParamIntValue(mk, b"Size", ctypes.byref(iv)) and iv.value > 0:
+                return float(iv.value)
+    except Exception:
+        pass
+    return None
+
+
+def _set_orig_size(doc, obj, size: float):
+    try:
+        mk = C.FPDFPageObj_AddMark(obj, ORIG_MARK)
+        if mk:
+            C.FPDFPageObjMark_SetFloatParam(doc.pdf.raw, obj, mk, b"Size", ctypes.c_float(float(size)))
+    except Exception:
+        pass
+
+
+def nice_size(v: float) -> float:
+    """1.0.22: cỡ chữ đọc từ PDF thường lệch vài phần trăm (12.98, 13.02 do làm tròn ma trận) -> làm tròn về cỡ
+    người dùng đã chọn khi soạn (bước 0.5 pt); lệch nhiều thì giữ 1 chữ số thập phân."""
+    h = round(v * 2) / 2
+    return h if abs(v - h) <= 0.06 else round(v, 1)
+
+
 def text_runs(doc, i: int) -> list[TextRun]:
     page = doc.page(i)
     tp = page.get_textpage()
@@ -440,8 +482,8 @@ def text_runs(doc, i: int) -> list[TextRun]:
             rgba = [ctypes.c_uint() for _ in range(4)]
             C.FPDFPageObj_GetFillColor(obj, *(ctypes.byref(v) for v in rgba))
             name, bold, italic = _font_info(obj)
-            out.append(TextRun(k, txt, round(eff, 2), name, bold, italic, tuple(v.value for v in rgba),
-                               fr.display_rect(l.value, b.value, r.value, t.value), obj))
+            out.append(TextRun(k, txt, nice_size(eff), name, bold, italic, tuple(v.value for v in rgba),
+                               fr.display_rect(l.value, b.value, r.value, t.value), obj, _get_orig_size(obj)))
     finally:
         tp.close()
     return out
@@ -740,6 +782,33 @@ def paragraph_of(runs, run: TextRun) -> list[list]:
     return lines
 
 
+MIN_HSCALE = 0.8        # co ngang tối đa 80% – hẹp hơn nữa thì mới thu nhỏ cỡ chữ
+
+
+def line_room(doc, i: int, lines, runs=None) -> float:
+    """1.0.22: mép phải tối đa (pt) mà dòng chữ được phép kéo dài khi gõ thêm: tới chữ kế tiếp cùng dòng
+    (nếu có) hoặc lề phải trang (lấy bằng lề trái của chữ trên trang, từ 18 tới 72 pt)."""
+    group = [r for ln in lines for r in ln]
+    ids = {r.index for r in group}
+    if runs is None:
+        runs = text_runs(doc, i)
+    right = max(r.rect[2] for r in group)
+    y0 = min(r.rect[1] for r in group)
+    y1 = max(r.rect[3] for r in group)
+    size = group[0].size or 10
+    pw, _ph = doc.page_size_pt(i)
+    lefts = [r.rect[0] for r in runs if r.rect[0] > 0]
+    margin = min(72.0, max(18.0, min(lefts) if lefts else 36.0))
+    limit = pw - margin
+    for r in runs:
+        if r.index in ids or r.rect[0] < right - 0.5:
+            continue
+        ov = min(y1, r.rect[3]) - max(y0, r.rect[1])
+        if ov > 0.3 * min(y1 - y0, r.rect[3] - r.rect[1]):
+            limit = min(limit, r.rect[0] - 0.4 * size)
+    return max(limit, right)
+
+
 def group_text(lines) -> str:
     return " ".join(" ".join(r.text.strip() for r in ln) for ln in lines)
 
@@ -747,8 +816,10 @@ def group_text(lines) -> str:
 def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = None, size: float | None = None,
                   color=None, fit: bool = True, snapshot: bool = True) -> dict:
     """Thay cả dòng / cả đoạn (lines: [[TextRun]]) bằng chữ mới – giữ lề trái, đường chân chữ, cách dòng.
-    fit: chữ mới dài hơn chỗ cũ thì tự co cỡ chữ cho vừa (11d). Trả về {"size": cỡ dùng, "shrunk": bool,
-    "overflow": bool}."""
+    1.0.22 – gõ thêm chữ GIỮ NGUYÊN cỡ chữ: một dòng thì kéo dài sang phải tới chữ kế tiếp / lề phải trang.
+    fit: hết chỗ thì co ngang chữ (tối đa còn 80%, giữ chiều cao) cho vừa 1 dòng; vẫn không vừa mới thu nhỏ cỡ.
+    size: người dùng chọn cỡ chữ -> luôn giữ đúng cỡ đó (không tự thu nhỏ lại), chỉ co ngang khi hết chỗ.
+    Trả về {"size", "hscale", "extended", "condensed", "shrunk", "overflow"}."""
     runs = [r for ln in lines for r in ln]
     first = lines[0][0]
     (x0, base0), upright = run_origin(doc, i, first)
@@ -756,6 +827,8 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
         raise ValueError("Dòng chữ này bị xoay nghiêng – hãy sửa từng mảnh chữ")
     fp = font_path or replacement_font(first)
     size0 = float(size or first.size)
+    keep = bool(size) and abs(float(size) - first.size) > 0.05     # cỡ do người dùng chọn: không thu nhỏ
+    orig = first.orig_size or first.size                            # nhớ cỡ gốc để quay lại được
     col = color or first.color
     right = max(r.rect[2] for r in runs)
     width = max(8.0, right - x0)
@@ -765,29 +838,49 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
     else:
         pitch = size0 * 1.2
     text = new_text.replace("\n", " ") if len(lines) > 1 else new_text.replace("\n", " ")
-    info = {"size": size0, "shrunk": False, "overflow": False}
+    info = {"size": size0, "hscale": 1.0, "extended": False, "condensed": False, "shrunk": False, "overflow": False}
     if text.strip():
         miss = fonts.missing_chars(fp, text)
         if miss:
             raise ValueError(f"Phông chữ không có ký tự: {miss}")
     sz = size0
+    hs = 1.0
     if len(lines) == 1:
         w = fonts.measure(fp, text, sz) if text.strip() else 0
         if w > width * 1.02:
-            if fit:
-                sz = max(size0 * 0.55, size0 * width / w)
-                info["shrunk"] = True
-                info["overflow"] = fonts.measure(fp, text, sz) > width * 1.02
+            room = max(width, line_room(doc, i, lines) - x0)
+            if w <= room:                                   # còn chỗ bên phải: giữ nguyên cỡ, kéo dài dòng
+                info["extended"] = True
+            elif fit:
+                hs = room / w
+                if hs >= MIN_HSCALE:                        # co ngang cho vừa 1 dòng, chiều cao giữ nguyên
+                    info["condensed"] = True
+                elif keep:                                  # giữ cỡ người dùng chọn
+                    hs = MIN_HSCALE
+                    info["condensed"] = True
+                    info["overflow"] = True
+                else:                                       # quá dài: co ngang tối đa rồi mới thu nhỏ cỡ
+                    hs = MIN_HSCALE
+                    sz = max(size0 * 0.55, size0 * room / (w * hs))
+                    info["condensed"] = info["shrunk"] = True
+                    info["overflow"] = fonts.measure(fp, text, sz) * hs > room * 1.02
             else:
                 info["overflow"] = True
         out_lines = [text]
     else:
         out_lines = fonts.wrap(fp, text, sz, width)
-        while fit and len(out_lines) > len(lines) and sz > size0 * 0.6:
+        while fit and len(out_lines) > len(lines) and hs > MIN_HSCALE + 1e-6:   # co ngang trước, giữ cỡ chữ
+            hs = max(MIN_HSCALE, hs - 0.05)
+            out_lines = fonts.wrap(fp, text, sz, width / hs)
+            info["condensed"] = True
+        while fit and not keep and len(out_lines) > len(lines) and sz > size0 * 0.6:
             sz *= 0.95
-            out_lines = fonts.wrap(fp, text, sz, width)
+            out_lines = fonts.wrap(fp, text, sz, width / hs)
             info["shrunk"] = True
         info["overflow"] = len(out_lines) > len(lines)
+        if keep and len(out_lines) > len(lines):        # cỡ lớn hơn: thêm dòng, cách dòng theo cỡ mới
+            pitch = max(pitch, sz * 1.2)
+    info["hscale"] = round(hs, 3)
     info["size"] = round(sz, 2)
     if snapshot:
         doc._snapshot()
@@ -803,8 +896,9 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
         try:
             for k, ln in enumerate(out_lines):
                 if ln.strip():
-                    C.FPDFPage_InsertObject(page.raw, _text_obj(doc, font, sz, ln, fr.matrix_at(x0, base0 + k * pitch),
-                                                                col))
+                    obj = _text_obj(doc, font, sz, ln, fr.matrix_at(x0, base0 + k * pitch, hscale=hs), col)
+                    _set_orig_size(doc, obj, orig)
+                    C.FPDFPage_InsertObject(page.raw, obj)
         finally:
             C.FPDFFont_Close(font)
     page.gen_content()

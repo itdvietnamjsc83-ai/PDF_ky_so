@@ -395,6 +395,8 @@ Khi đặt ảnh, con dấu, chữ ký ảnh, nét chữ tay của mình lên tr
 ## Bản 1.0.22 (16 góp ý của anh Dũng)
 
 - Đã bỏ tính năng **Gửi email** (nút trên thanh Trang chủ, MAPI/Mail) theo yêu cầu.
+- **Sửa chữ giữ nguyên cỡ:** gõ thêm chữ thì dòng kéo dài sang phải tới chữ bên cạnh / lề phải trang, không thu nhỏ; hết chỗ mới co ngang chữ (tối đa 80%, giữ chiều cao) cho vừa 1 dòng, quá dài mới giảm cỡ. Cỡ do người dùng chọn luôn được giữ.
+- **Cỡ chữ gốc:** ô cỡ chữ hiện đúng cỡ của dòng đang sửa (làm tròn 12.98 -> 13); cỡ gốc được ghi vào chữ đã sửa (marked content `PdfKySoGoc`, còn sau khi lưu) – nút ↺ trên thanh định dạng đưa về đúng cỡ gốc.
 
 - **Xoay ảnh / dấu / chữ ký đã chèn:** núm xoay tròn trên khung, ô "Xoay" ở bảng bên phải; bấm lại ảnh đã chèn vẫn xoay
   tiếp được (giữ nguyên cỡ, không méo).

@@ -345,8 +345,10 @@ class ToolOptions(QFrame):
         for k, lbl in (("run", "Mảnh chữ"), ("line", "Cả dòng"), ("para", "Cả đoạn")):
             self.cb_scope.addItem(lbl, k)
         self.cb_scope.setCurrentIndex(1)
-        self.chk_fit = WrapCheck("Chữ dài hơn thì tự co cho vừa chỗ cũ", checked=True)
-        self.chk_fit.setToolTip("Chữ mới dài hơn chỗ cũ thì tự thu nhỏ cỡ chữ cho vừa (tránh đè lên chữ bên cạnh)")
+        self.chk_fit = WrapCheck("Hết chỗ bên phải thì co chữ hẹp lại cho vừa 1 dòng", checked=True)
+        self.chk_fit.setToolTip("Gõ thêm chữ luôn giữ nguyên cỡ chữ: dòng kéo dài sang phải tới chữ bên cạnh / lề "
+                                "phải trang.\nHết chỗ thì co chữ hẹp lại (giữ chiều cao) cho vừa 1 dòng; quá dài "
+                                "mới thu nhỏ cỡ chữ.")
         ew2 = QWidget()
         ev2 = QVBoxLayout(ew2)
         ev2.setContentsMargins(0, 0, 0, 0)
@@ -2077,6 +2079,10 @@ class InlineFormatBar(QFrame):
         self.sp_size = QDoubleSpinBox(minimum=0 if mode == "edit" else 4, maximum=200, value=12, decimals=1,
                                       suffix=" pt", toolTip="Cỡ chữ" + (" (0: giữ cỡ gốc)" if mode == "edit" else ""))
         self.sp_size.setKeyboardTracking(False)
+        self._orig_size = None
+        self.btn_orig = QToolButton(text="↺", toolTip="Về cỡ chữ gốc")     # 1.0.22: chỉ khi sửa chữ có sẵn
+        self.btn_orig.clicked.connect(self._to_orig_size)
+        self.btn_orig.setVisible(False)
         self.btn_bold = QToolButton(text="B", checkable=True, toolTip="Đậm (Ctrl+B)")
         self.btn_bold.setStyleSheet("QToolButton{font-weight:bold}")
         self.btn_italic = QToolButton(text="I", checkable=True, toolTip="Nghiêng (Ctrl+I)")
@@ -2096,7 +2102,7 @@ class InlineFormatBar(QFrame):
         self.btn_cancel.setStyleSheet("QToolButton{color:#c62828}")
         self.btn_ok.clicked.connect(self.accepted.emit)
         self.btn_cancel.clicked.connect(self.rejected.emit)
-        for w in (self.cb_font, self.sp_size, self.btn_bold, self.btn_italic, self.btn_color):
+        for w in (self.cb_font, self.sp_size, self.btn_orig, self.btn_bold, self.btn_italic, self.btn_color):
             lay.addWidget(w)
         if mode != "edit":
             lay.addSpacing(4)
@@ -2108,6 +2114,7 @@ class InlineFormatBar(QFrame):
         self._quiet = False
         self.cb_font.currentIndexChanged.connect(self._font_changed)
         self.sp_size.valueChanged.connect(self._emit)
+        self.sp_size.valueChanged.connect(lambda _v: self._sync_orig())
         self.btn_bold.toggled.connect(self._emit)
         self.btn_italic.toggled.connect(self._emit)
         for w in self.findChildren(QWidget):
@@ -2115,6 +2122,22 @@ class InlineFormatBar(QFrame):
         self._paint_color()
 
     # ----- trạng thái
+    def set_orig_size(self, size: float | None):
+        """Cỡ chữ gốc của dòng (trước lần sửa đầu tiên, đọc từ file) -> nút ↺ đưa ô cỡ về đúng cỡ đó."""
+        self._orig_size = float(size) if size else None
+        self.btn_orig.setVisible(self._orig_size is not None)
+        if self._orig_size is not None:
+            self.btn_orig.setToolTip(f"Về cỡ chữ gốc: {self._orig_size:g} pt")
+        self._sync_orig()
+
+    def _sync_orig(self):
+        if self._orig_size is not None:
+            self.btn_orig.setEnabled(abs(self.sp_size.value() - self._orig_size) > 0.05)
+
+    def _to_orig_size(self):
+        if self._orig_size is not None:
+            self.sp_size.setValue(self._orig_size)
+
     def set_state(self, st: dict):
         self._quiet = True
         try:

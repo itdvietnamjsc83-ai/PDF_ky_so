@@ -547,3 +547,71 @@ def test_hand_review_dialog_flow(qapp, monkeypatch):
     assert dlg.glyphs["b"] is None or dlg.glyphs["b"].getchannel("A").getbbox()[2] <= 30
     hs = hw.HandSet(dlg.sprite())
     assert hs.has("k") and not hs.has("a")
+
+
+# ------------------------------------------------------------------ sửa chữ: giữ cỡ chữ, cỡ gốc, đổi cỡ
+def test_nice_size_snaps_rounding():
+    from app.editing import nice_size
+    assert nice_size(12.98) == 13 and nice_size(11.02) == 11 and nice_size(10.5) == 10.5 and nice_size(9.27) == 9.3
+
+
+def test_edit_shows_original_size_and_applies_new_size(win, qapp, tmp_path):
+    from app import editing
+    from .test_dot2 import _open as _open2
+    from .test_gui_phase5 import _click
+    tab = _open2(win, qapp, tmp_path, 1)
+    win.start_tool("edittext")
+    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 100, 135))
+    bar = tab.view._inline_bar
+    assert bar.sp_size.value() == 11 and win.tool_opts.sp_size.value() == 11     # đúng cỡ gốc, không phải 0
+    tab.view._finish_inline(True)                                               # không sửa gì -> không đổi
+    assert not tab.doc.can_undo
+    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 100, 135))
+    tab.view._inline_bar.sp_size.setValue(20)
+    tab.view._finish_inline(True)
+    sizes = [r.size for r in editing.text_runs(tab.doc, 0) if r.text.startswith("Điều khoản")]
+    assert 20 in sizes                                                          # cỡ mới được áp dụng
+    win.stop_tool()
+
+
+def test_paragraph_bigger_size_not_shrunk_back():
+    from app import editing
+    from app.document import PdfDocument
+    from .test_phase4 import _contract
+    d = PdfDocument(data=_contract(1))
+    runs = editing.text_runs(d, 0)
+    para = editing.paragraph_of(runs, runs[3])
+    info = editing.replace_group(d, 0, para, editing.group_text(para), size=16)
+    assert info["size"] == 16 and not info["shrunk"]
+
+
+def test_original_size_remembered_after_save_and_restore(win, qapp, tmp_path):
+    from app import editing
+    from app.document import PdfDocument
+    from .test_dot2 import _open as _open2
+    from .test_gui_phase5 import _click
+    from .test_phase4 import _contract
+    d = PdfDocument(data=_contract(1))
+    runs = editing.text_runs(d, 0)
+    editing.replace_group(d, 0, [editing.line_of(runs, runs[1])], "Dòng đã phóng to", size=20)
+    d2 = PdfDocument(data=d.to_bytes())                                       # lưu file rồi mở lại
+    r = next(x for x in editing.text_runs(d2, 0) if x.text.startswith("Dòng đã"))
+    assert r.size == 20 and r.orig_size == 11
+    editing.replace_group(d2, 0, [[r]], "Dòng đã phóng to lần nữa", size=16)  # sửa tiếp vẫn nhớ cỡ gốc
+    r = next(x for x in editing.text_runs(d2, 0) if x.text.startswith("Dòng đã"))
+    assert r.size == 16 and r.orig_size == 11
+    # giao diện: nút ↺ đưa về đúng cỡ gốc
+    tab = _open2(win, qapp, tmp_path, 1)
+    win.start_tool("edittext")
+    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 100, 135))
+    tab.view._inline_bar.sp_size.setValue(20)
+    tab.view._finish_inline(True)
+    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 100, 140))
+    bar = tab.view._inline_bar
+    assert bar.sp_size.value() == 20 and bar.btn_orig.isEnabled()
+    bar.btn_orig.click()
+    assert bar.sp_size.value() == 11 and not bar.btn_orig.isEnabled()
+    tab.view._finish_inline(True)
+    r = next(x for x in editing.text_runs(tab.doc, 0) if x.text.startswith("Điều khoản") and x.orig_size)
+    assert r.size == 11
+    win.stop_tool()
