@@ -140,14 +140,22 @@ def test_textbox_tool(win, qapp, tmp_path, monkeypatch):
 
 def test_note_tool(win, qapp, tmp_path, monkeypatch):
     tab = _open(win, qapp, tmp_path, 1)
-
-    def fake_exec(self):
-        self.ed.setPlainText("Xem lại điều 3")
-        return QDialog.Accepted
-    monkeypatch.setattr(ui_edit.NoteDialog, "exec", fake_exec)
     win.start_tool("note")
-    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 500, 150))
-    assert editing.notes(tab.doc, 0) == ["Xem lại điều 3"]
+    c = tab.view.canvas
+    c.mousePressEvent(_click(tab.view, 0, 500, 150))
+    c.mouseReleaseEvent(_click(tab.view, 0, 500, 150, kind=QEvent.MouseButtonRelease))
+    w = tab.view.callout()                       # 1.0.22: khung ghi chú nổi ngay chỗ bấm, có mũi tên
+    assert w is not None and w.isVisible() and w.btn_delete is None
+    r = tab.view._rects[0]
+    tip = w.mapTo(c, w.tip().toPoint())
+    assert abs(tip.x() - (r.left() + 500 * tab.view.scale)) <= 2 and abs(tip.y() - (r.top() + 150 * tab.view.scale)) <= 2
+    w.ed.setPlainText("Xem lại điều 3")
+    w.btn_save.click()
+    assert editing.notes(tab.doc, 0) == ["Xem lại điều 3"] and tab.view.callout() is None
+    c.mousePressEvent(_click(tab.view, 0, 300, 300))          # ghi chú trống, bấm ra ngoài: bỏ, không thêm
+    c.mouseReleaseEvent(_click(tab.view, 0, 300, 300, kind=QEvent.MouseButtonRelease))
+    c.mousePressEvent(_click(tab.view, 0, 300, 500))
+    assert tab.view.callout() is None and editing.notes(tab.doc, 0) == ["Xem lại điều 3"]
 
 
 def test_edit_text_tool(win, qapp, tmp_path, monkeypatch):

@@ -54,6 +54,8 @@ class _Canvas(QWidget):
 
     def mousePressEvent(self, ev):
         v = self.view
+        if v.callout_outside():                   # bấm ra ngoài khung ghi chú: lưu / đóng khung, không làm gì thêm
+            return
         had_inline = v._inline is not None
         v._finish_inline()
         if had_inline and v.tool and v.tool.kind == "textbox":
@@ -293,6 +295,7 @@ class PageView(QScrollArea):
         self.show_grid = False
         self._pressure = None
         self._inline = None              # ô sửa chữ tại chỗ đang mở
+        self._callout = None             # khung ghi chú nổi trên trang: (widget, trang, (x, y) pt, bấm ra ngoài)
         # widget -> True: bấm vào đó (vd. bảng cỡ chữ / đậm / màu bên phải) KHÔNG đóng ô sửa chữ tại chỗ
         self.inline_keep = None
         self._mag = None                 # kính lúp: (trang, x, y)
@@ -325,6 +328,7 @@ class PageView(QScrollArea):
         self._rects = rects
         self.canvas.resize(cw, int(y - GAP + MARGIN) if rects else self.viewport().height())
         self.canvas.update()
+        self._place_callout()
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
@@ -1318,9 +1322,77 @@ class PageView(QScrollArea):
                     return True
         return super().eventFilter(obj, ev)
 
+    # ---------- khung ghi chú nổi (mũi tên trỏ vào chỗ ghi chú) ----------
+    def show_callout(self, w, page: int, anchor_pt, on_outside=None):
+        """Hiện khung w ngay trên trang, mũi tên trỏ vào anchor_pt (x, y pt). on_outside(): bấm ra ngoài khung."""
+        self.close_callout()
+        self._finish_inline()
+        w.setParent(self.canvas)
+        self._callout = (w, page, (float(anchor_pt[0]), float(anchor_pt[1])), on_outside)
+        w.adjustSize()
+        w.show()
+        w.raise_()
+        self._place_callout()
+        self.ensureWidgetVisible(w, 8, 8)
+        self._place_callout()
+
+    def callout(self):
+        return self._callout[0] if self._callout else None
+
+    def close_callout(self):
+        c = self._callout
+        self._callout = None
+        if c is not None:
+            c[0].hide()
+            c[0].deleteLater()
+            self.setFocus()
+
+    def callout_outside(self) -> bool:
+        """Bấm ra ngoài khung ghi chú. True nếu có khung đang mở (đã xử lý cú bấm)."""
+        c = self._callout
+        if c is None:
+            return False
+        if c[3] is not None:
+            c[3]()
+        if self._callout is c:
+            self.close_callout()
+        return True
+
+    def _place_callout(self):
+        c = self._callout
+        if c is None or c[1] >= len(self._rects):
+            return
+        from .note_callout import TAIL
+        w, page, (ax, ay), _ = c
+        r = self._rects[page]
+        s = self.scale
+        px, py = r.left() + ax * s, r.top() + ay * s
+        w.adjustSize()
+        ww, wh = w.width(), w.height()
+        vis_l, vis_t = self.horizontalScrollBar().value(), self.verticalScrollBar().value()
+        vis_r = vis_l + self.viewport().width()
+        if px + ww <= vis_r - 4 or px - ww < vis_l + 4:
+            side = "left"                                # khung bên phải chỗ trỏ (mũi tên bên trái)
+        else:
+            side = "right"
+        x = px - 3 if side == "left" else px - ww + 3
+        vis_b = vis_t + self.viewport().height()
+        y = py - 28
+        if y + wh > vis_b - 4:                           # gần mép dưới màn hình: đẩy khung lên
+            y = vis_b - 4 - wh
+        if y < vis_t + 4:
+            y = vis_t + 4
+        y = min(max(y, py - wh + 22), py - 22)            # mũi tên luôn nằm trong cạnh khung
+        y = min(max(y, 0), max(0, self.canvas.height() - wh))
+        w.set_side(side, py - y)
+        w.move(int(round(x)), int(round(y)))
+        w.raise_()
+
     # ---------- công cụ vẽ / ghi chú ----------
     def set_tool(self, tool: "Tool | None"):
         self._finish_inline()
+        if self._callout is not None:
+            self.callout_outside()
         self.tool = tool
         self._mag = None
         if tool:

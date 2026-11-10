@@ -113,34 +113,58 @@ def test_note_icon_image():
         assert img.width > 30 and img.getbbox()
 
 
-def test_gui_click_note_opens_dialog_and_edits(win, qapp, tmp_path, monkeypatch):
+def test_gui_click_note_opens_dialog_and_edits(win, qapp, tmp_path):
+    """1.0.22: bấm vào ghi chú -> khung xòe ra ngay tại chỗ (không mở cửa sổ mới), sửa / trả lời luôn."""
     tab = _open(win, qapp, tmp_path, 1)
     nm = notes.add_note(tab.doc, 0, 400, 300, "Ghi chú cũ", "An")
     tab.refresh()
-    seen = {}
-
-    def fake_exec(self):
-        seen["text"] = self.ed.toPlainText()
-        self.ed.setPlainText("Ghi chú đã sửa")
-        self.chk_done.setChecked(True)
-        self.ed_reply.setText("Tôi đã xem")
-        return QDialog.Accepted
-    monkeypatch.setattr(ui_edit.NoteDialog, "exec", fake_exec)
     c = tab.view.canvas
     c.mousePressEvent(_click(tab.view, 0, 405, 305))
     assert tab.view.placement is not None                           # chọn ghi chú (kéo được)
     c.mouseReleaseEvent(_click(tab.view, 0, 405, 305, kind=QEvent.MouseButtonRelease))
-    assert seen["text"] == "Ghi chú cũ"                              # bấm (không kéo) -> mở ra đọc
+    w = tab.view.callout()
+    assert w is not None and w.parent() is c and w.isVisible()      # khung nằm ngay trên trang
+    assert w.ed.toPlainText() == "Ghi chú cũ"
+    # mũi tên trỏ đúng cạnh biểu tượng ghi chú
+    n0 = notes.list_notes(tab.doc)[0]
+    r = tab.view._rects[0]
+    tip = w.mapTo(c, w.tip().toPoint())
+    assert abs(tip.x() - (r.left() + n0.rect[2] * tab.view.scale)) <= 2
+    assert n0.rect[1] * tab.view.scale - 2 <= tip.y() - r.top() <= n0.rect[3] * tab.view.scale + 2
+    w.ed.setPlainText("Ghi chú đã sửa")
+    w.chk_done.setChecked(True)
+    w.ed_reply.setText("Tôi đã xem")
+    w.btn_save.click()
     n = notes.list_notes(tab.doc)[0]
     assert n.text == "Ghi chú đã sửa" and n.done and [r.text for r in n.replies] == ["Tôi đã xem"]
-    assert tab.view.placement is None
+    assert tab.view.placement is None and tab.view.callout() is None
+
+
+def test_gui_note_callout_delete_and_outside_click(win, qapp, tmp_path):
+    tab = _open(win, qapp, tmp_path, 1)
+    nm = notes.add_note(tab.doc, 0, 400, 300, "Xóa tôi", "An")
+    tab.refresh()
+    win._edit_note_dialog(tab, 0, nm)
+    w = tab.view.callout()
+    w.btn_delete.click()
+    assert notes.list_notes(tab.doc) == [] and tab.view.callout() is None
+    nm = notes.add_note(tab.doc, 0, 100, 100, "Cũ", "An")
+    tab.refresh()
+    win._edit_note_dialog(tab, 0, nm)
+    tab.view.callout().ed.setPlainText("Mới")
+    tab.view.canvas.mousePressEvent(_click(tab.view, 0, 500, 700))  # bấm ra ngoài: lưu
+    assert tab.view.callout() is None and notes.list_notes(tab.doc)[0].text == "Mới"
+    win._edit_note_dialog(tab, 0, nm)
+    tab.view.callout().ed.setPlainText("Bỏ")
+    from PySide6.QtWidgets import QApplication
+    QApplication.sendEvent(tab.view.callout().ed, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))  # Esc: thôi
+    assert tab.view.callout() is None and notes.list_notes(tab.doc)[0].text == "Mới"
 
 
 def test_gui_drag_note_moves(win, qapp, tmp_path, monkeypatch):
     tab = _open(win, qapp, tmp_path, 1)
     notes.add_note(tab.doc, 0, 400, 300, "Dời tôi", "An")
     tab.refresh()
-    monkeypatch.setattr(ui_edit.NoteDialog, "exec", lambda self: QDialog.Rejected)
     _drag(tab.view, 0, (405, 305), (205, 505))
     assert tab.view.placement is not None
     _key(tab.view, Qt.Key_Return)
@@ -162,11 +186,10 @@ def test_gui_protected_file_notes_readable(win, qapp, tmp_path, monkeypatch):
     assert not tab.doc.can_modify
     seen = {}
 
-    def fake_exec(self):
-        seen["text"], seen["ro"] = self.ed.toPlainText(), self.ed.isReadOnly()
-        return QDialog.Rejected
-    monkeypatch.setattr(ui_edit.NoteDialog, "exec", fake_exec)
     win.page_pressed(0, 110, 130)
+    w = tab.view.callout()
+    seen = {"text": w.ed.toPlainText(), "ro": w.ed.isReadOnly()}
+    assert w.btn_save is None and w.btn_delete is None
     assert seen == {"text": "Ghi chú từ Acrobat: xem lại điều 5", "ro": True}
 
 

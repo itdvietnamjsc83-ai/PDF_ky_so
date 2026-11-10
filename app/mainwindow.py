@@ -2936,18 +2936,9 @@ class MainWindow(QMainWindow):
             elif kind == "textbox":
                 if not self._text_box(tab, page, data):
                     return
-            elif kind == "note":
-                from .notes import add_note
-                from .ui_edit import NoteDialog
-                dlg = NoteDialog(self, self.settings.value("note/author", "") or os.environ.get("USERNAME", ""),
-                                 settings=self.settings)
-                if dlg.exec() != NoteDialog.Accepted:
-                    return
-                v = dlg.values()
-                self.settings.setValue("note/author", v["author"])
-                self.settings.setValue("note/color", v["color"])
-                self.settings.setValue("note/icon", v["icon"])
-                add_note(doc, page, data[0], data[1], v["text"], v["author"], v["color"], v["icon"], v["opacity"])
+            elif kind == "note":                 # 1.0.22: khung ghi chú nổi ngay trên trang, mũi tên trỏ vào chỗ bấm
+                self._open_note_callout(tab, page, None, anchor=(data[0], data[1]))
+                return
             elif kind == "edittext":
                 if not self._edit_text(tab, page, *data):
                     return
@@ -4030,38 +4021,82 @@ class MainWindow(QMainWindow):
         pl.hint = "Ghi chú · kéo để dời · bấm để mở / sửa · Delete: xóa · Esc: thôi"
 
     def _edit_note_dialog(self, tab, page, nm):
+        """Mở ghi chú ngay tại chỗ: khung xòe ra trên trang, sửa / trả lời / xóa luôn trong khung."""
         from . import notes
-        from .ui_edit import NoteDialog
         doc = tab.doc
         n = next((x for x in notes.list_notes(doc, [page]) if x.nm == nm), None)
         if n is None:
             n = next((r for x in notes.list_notes(doc, [page]) for r in x.replies if r.nm == nm), None)
         if n is None:
             return
+        self._open_note_callout(tab, page, n)
+
+    def _open_note_callout(self, tab, page, n, anchor=None):
+        """n=None: ghi chú mới tại anchor (x, y pt). Ngược lại: xem / sửa ghi chú n ngay tại vị trí của nó."""
+        from . import notes
+        from .note_callout import NoteCallout
+        doc = tab.doc
         me = self.settings.value("note/author", "") or os.environ.get("USERNAME", "")
-        dlg = NoteDialog(self, me, note=n, settings=self.settings, readonly=not doc.can_modify)
-        if dlg.exec() != NoteDialog.Accepted or not doc.can_modify:
-            return
-        v = dlg.values()
-        changed = (v["action"] == "delete" or v["reply"] or v["text"] != n.text or v["author"] != n.author or
-                   v["done"] != n.done or (n.is_sticky and (v["color"] != n.color or v["icon"] != n.icon or
-                                                            v["opacity"] != n.opacity)))
-        if not changed or not self._writable(tab, "Sửa ghi chú"):
-            return
-        if v["action"] == "delete":
-            notes.delete_note(doc, page, nm)
+        readonly = n is not None and not doc.can_modify
+        w = NoteCallout(me, note=n, settings=self.settings, readonly=readonly)
+        if n is not None:
+            x0, y0, x1, y1 = n.rect
+            if n.is_sticky:
+                anchor = (x1, y0 + min(y1 - y0, 24) / 2)  # cạnh phải biểu tượng
+            else:
+                anchor = (x1, y0)
+            if anchor[0] > doc.page_size_pt(page)[0] - 4:
+                anchor = (x0, anchor[1])
+        view = tab.view
+
+        def close():
+            if view.callout() is w:
+                view.close_callout()
+
+        def save(v):
+            close()
+            if n is None:
+                if not v["text"].strip() or not self._writable(tab, "Thêm ghi chú"):
+                    return
+                self.settings.setValue("note/author", v["author"])
+                self.settings.setValue("note/color", v["color"])
+                self.settings.setValue("note/icon", v["icon"])
+                notes.add_note(doc, page, anchor[0], anchor[1], v["text"], v["author"], v["color"], v["icon"],
+                               v["opacity"])
+                self._flash("Đã thêm ghi chú. Ctrl+Z để hoàn tác.")
+            else:
+                if readonly or not self._writable(tab, "Sửa ghi chú"):
+                    return
+                doc._snapshot()
+                notes.update_note(doc, page, n.nm, v["text"], v["author"], v["color"], v["icon"], v["opacity"],
+                                  v["done"], snapshot=False)
+                if v["reply"]:
+                    notes.add_note(doc, page, n.rect[0], n.rect[1], v["reply"], me, n.color, "comment", 100,
+                                   reply_to=n.nm, snapshot=False)
+                doc._changed()
+                self._flash("Đã cập nhật ghi chú. Ctrl+Z để hoàn tác.")
+            tab.refresh()
+            self._update_state()
+
+        def delete():
+            close()
+            if n is None or not self._writable(tab, "Xóa ghi chú"):
+                return
+            notes.delete_note(doc, page, n.nm)
+            tab.refresh()
+            self._update_state()
             self._flash("Đã xóa ghi chú. Ctrl+Z để hoàn tác.")
-        else:
-            doc._snapshot()
-            notes.update_note(doc, page, nm, v["text"], v["author"], v["color"], v["icon"], v["opacity"], v["done"],
-                              snapshot=False)
-            if v["reply"]:
-                notes.add_note(doc, page, n.rect[0], n.rect[1], v["reply"], me, n.color, "comment", 100,
-                               reply_to=nm, snapshot=False)
-            doc._changed()
-            self._flash("Đã cập nhật ghi chú. Ctrl+Z để hoàn tác.")
-        tab.refresh()
-        self._update_state()
+
+        w.saveRequested.connect(save)
+        w.deleteRequested.connect(delete)
+        w.closeRequested.connect(close)
+        view.show_callout(w, page, anchor, w.finish_outside)
+        (w.ed if not readonly else w).setFocus()
+        if not readonly:
+            c = w.ed.textCursor()
+            c.movePosition(c.MoveOperation.End)
+            w.ed.setTextCursor(c)
+        return w
 
     # --- danh sách ghi chú (12b) ---
     def toggle_notes_panel(self, show: bool | None = None):
