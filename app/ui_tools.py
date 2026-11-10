@@ -40,7 +40,7 @@ class ProtectDialog(QDialog):
         row.addWidget(self.btn_del)
         v.addLayout(row)
 
-        g = QGroupBox("In")
+        g = self.grp_print = QGroupBox("In")
         gl = QVBoxLayout(g)
         self.rb = {k: QRadioButton(t) for k, t in ((PRINT_NONE, "Không cho in"),
                                                      (PRINT_LOW, "Chỉ cho in chất lượng thấp"),
@@ -74,7 +74,7 @@ class ProtectDialog(QDialog):
             gl.addWidget(c)
         v.addWidget(g)
 
-        g = QGroupBox("Mật khẩu")
+        g = self.grp_pw = QGroupBox("Mật khẩu")
         f = QFormLayout(g)
         self.ed_open = QLineEdit(echoMode=QLineEdit.Password, placeholderText="để trống: ai cũng mở xem được")
         self.ed_open2 = QLineEdit(echoMode=QLineEdit.Password, placeholderText="nhập lại")
@@ -102,8 +102,19 @@ class ProtectDialog(QDialog):
         self.ed_owner.textChanged.connect(self._update)
         last = settings.value("protect/last") if settings is not None else None
         self.set_options(ProtectOptions.from_dict(json.loads(last)) if last else PRESETS[1][1])
+        # 1.0.22: mở đúng phần theo nút đã bấm (Mật khẩu / Quyền in / Mẫu bảo vệ) – tô viền phần đó
+        hl = "QGroupBox{border:1px solid #b8322a;border-radius:6px;margin-top:8px;padding-top:6px}"
         if focus == "password":
+            self.setWindowTitle("Lưu có bảo vệ – Mật khẩu")
+            self.grp_pw.setStyleSheet(hl)
             self.ed_open.setFocus()
+        elif focus == "print":
+            self.setWindowTitle("Lưu có bảo vệ – Quyền in")
+            self.grp_print.setStyleSheet(hl)
+            (self.grp.checkedButton() or self.rb[PRINT_HIGH]).setFocus()
+        elif focus == "presets":
+            self.setWindowTitle("Lưu có bảo vệ – Mẫu bảo vệ")
+            self.cb_preset.setFocus()
 
     # ---- mẫu
     def _user_presets(self) -> list:
@@ -281,7 +292,8 @@ class StampTextDialog(QDialog):
         for t, c in (("Đỏ", "#d32f2f"), ("Xanh", "#0d47a1"), ("Đen", "#1b1b1b"), ("Xám", "#757575")):
             self.cb_color.addItem(t, c)
         f.addRow("Màu:", self.cb_color)
-        self.sl_op = QSlider(Qt.Horizontal, minimum=10, maximum=60, value=25)
+        from .widgets import SliderSpin
+        self.sl_op = SliderSpin(10, 60, 25)
         f.addRow("Độ đậm (watermark):", self.sl_op)
         self.cb_scope = QComboBox()
         self.cb_scope.addItem("Tất cả các trang", "all")

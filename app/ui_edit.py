@@ -299,11 +299,11 @@ class ToolOptions(QFrame):
         self.lbl_size.setWordWrap(True)
         w = row("size", self.sp_size, "stretch")
         w.layout().insertWidget(0, self.lbl_size)
-        from PySide6.QtWidgets import QSlider
-        self.sl_opacity = QSlider(Qt.Horizontal, minimum=10, maximum=100, value=100)
-        self.lbl_opacity = QLabel("100%")
-        self.lbl_opacity.setMinimumWidth(36)
-        row("opacity", self.sl_opacity, self.lbl_opacity, label="Độ đậm:")
+        from .widgets import SliderSpin
+        self.sl_opacity = SliderSpin(10, 100, 100, tooltip="Độ đậm")
+        self.lbl_opacity = QLabel("100%")           # (giữ cho mã cũ – số % hiện trong ô nhập)
+        self.lbl_opacity.setVisible(False)
+        row("opacity", self.sl_opacity, label="Độ đậm:")
         self.cb_dash = QComboBox()
         for k, lbl in DASHES:
             self.cb_dash.addItem(lbl, k)
@@ -316,7 +316,7 @@ class ToolOptions(QFrame):
         self.btn_fill = QToolButton(toolTip="Màu tô")
         self.btn_fill.setFixedSize(26, 22)
         self.btn_fill.clicked.connect(self.pick_fill)
-        self.sl_fill = QSlider(Qt.Horizontal, minimum=0, maximum=100, value=40, toolTip="Độ đậm màu tô")
+        self.sl_fill = SliderSpin(0, 100, 40, tooltip="Độ đậm màu tô")
         row("fill", self.chk_fill, self.btn_fill, self.sl_fill)
         self.chk_shadow = QCheckBox("Bóng đổ")
         self.sp_radius = QDoubleSpinBox(minimum=0, maximum=60, value=0, suffix=" pt")
@@ -853,8 +853,9 @@ IMAGE_SCOPES = [("current", "Trang hiện tại"), ("selected", "Các trang đan
 
 class ImageOptions(QFrame):
     """Bảng tùy chọn ảnh (bên phải) khi đang đặt ảnh, con dấu, chữ ký, chữ viết tay lên trang:
-    lớp (nổi trên / hòa trộn / chìm dưới chữ), độ đậm, góc xoay, xóa nền trắng, đóng lên nhiều trang."""
+    lớp (nổi trên / hòa trộn / chìm dưới chữ), cỡ, độ đậm, góc xoay, xóa nền trắng, đóng lên nhiều trang."""
     changed = Signal()
+    sizeRequested = Signal(float)              # % so với cỡ lúc bắt đầu
 
     def __init__(self, settings=None):
         super().__init__(objectName="card")
@@ -880,14 +881,20 @@ class ImageOptions(QFrame):
                                  "Hòa trộn: chữ đen vẫn hiện xuyên qua mực – giống dấu đóng thật (khuyên dùng cho dấu).\n"
                                  "Chìm dưới chữ: ảnh nằm dưới chữ, hình, bảng (trang văn bản).")
         f.addRow("Lớp:", self.cb_layer)
-        row = QHBoxLayout()
-        self.sl_opacity = QSlider(Qt.Horizontal, minimum=10, maximum=100, value=100)
-        self.lbl_opacity = QLabel("100%")
-        self.lbl_opacity.setFixedWidth(34)
-        row.addWidget(self.sl_opacity, 1)
-        row.addWidget(self.lbl_opacity)
+        from .widgets import SliderSpin
+        # 1.0.22: cỡ ảnh – kéo thanh hoặc gõ số % (so với cỡ lúc bắt đầu đặt); Ctrl + lăn chuột trên ảnh cũng được
+        self.sl_size = SliderSpin(5, 500, 100, tooltip="Cỡ ảnh so với lúc bắt đầu")
+        self.lbl_size_cap = QLabel("Cỡ:")
+        f.addRow(self.lbl_size_cap, self.sl_size)
+        self.lbl_size = QLabel("", objectName="lbl")
+        f.addRow("", self.lbl_size)
+        self._base_w = None
+        self.sl_size.valueChanged.connect(lambda v: self.sizeRequested.emit(float(v)))
+        self.sl_opacity = SliderSpin(10, 100, 100, tooltip="Độ đậm")
+        self.lbl_opacity = QLabel("100%")           # (giữ cho mã cũ – số đã hiện trong ô nhập)
+        self.lbl_opacity.setVisible(False)
         self.lbl_op_cap = QLabel("Độ đậm:")
-        f.addRow(self.lbl_op_cap, row)
+        f.addRow(self.lbl_op_cap, self.sl_opacity)
         self.sp_angle = QDoubleSpinBox(minimum=-180, maximum=180, singleStep=1, decimals=0, suffix="°")
         self.sp_angle.setWrapping(True)
         self.lbl_angle = QLabel("Xoay:")
@@ -915,7 +922,7 @@ class ImageOptions(QFrame):
         self.cb_scope.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.cb_scope.setMinimumContentsLength(12)
         self.lbl_scope = QLabel("Đóng lên:")
-        for lab in (self.lbl_scope, self.lbl_angle, self.lbl_op_cap):
+        for lab in (self.lbl_scope, self.lbl_angle, self.lbl_op_cap, self.lbl_size_cap):
             lab.setMinimumWidth(64)
         f.addRow(self.lbl_scope, self.cb_scope)
         v.addLayout(f)
@@ -1049,6 +1056,30 @@ class ImageOptions(QFrame):
         self.title.setText(title)
         self._update_hint()
         self.setVisible(True)
+
+    # ---- cỡ ảnh
+    def set_base_size(self, w_pt: float, h_pt: float):
+        """Cỡ lúc bắt đầu đặt / sửa = 100%."""
+        self._base_w = max(1e-3, float(w_pt))
+        self.sl_size.blockSignals(True)
+        self.sl_size.setValue(100)
+        self.sl_size.blockSignals(False)
+        self._show_mm(w_pt, h_pt)
+
+    def sync_size(self, w_pt: float, h_pt: float):
+        """Khung vừa được kéo góc đổi cỡ trên trang -> cập nhật ô Cỡ (không phát lại tín hiệu)."""
+        if not self._base_w:
+            return
+        self.sl_size.blockSignals(True)
+        self.sl_size.setValue(int(round(w_pt / self._base_w * 100)))
+        self.sl_size.blockSignals(False)
+        self._show_mm(w_pt, h_pt)
+
+    def base_width(self):
+        return self._base_w
+
+    def _show_mm(self, w_pt, h_pt):
+        self.lbl_size.setText(f"{w_pt * 25.4 / 72:.0f} × {h_pt * 25.4 / 72:.0f} mm")
 
     def edit_changed(self) -> bool:
         return self._edit and (self.cb_layer.currentData(), self.opacity) != getattr(self, "_edit_start", (None, None))
@@ -1236,7 +1267,8 @@ class NoteDialog(QDialog):
         self.cb_icon = QComboBox()
         for k, lbl in NOTE_ICONS:
             self.cb_icon.addItem(lbl, k)
-        self.sl_opacity = QSlider(Qt.Horizontal, minimum=20, maximum=100, value=100)
+        from .widgets import SliderSpin
+        self.sl_opacity = SliderSpin(20, 100, 100, tooltip="Độ đậm")
         self.chk_done = QCheckBox("Đã xử lý")
         sticky = note is None or getattr(note, "is_sticky", True)
         if note is not None and not reply_mode:

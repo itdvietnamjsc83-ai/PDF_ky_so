@@ -329,3 +329,61 @@ def test_draw_dialog_saves_signature(win, qapp, monkeypatch):
     img.loadFromData(win.library.image(it.id))
     assert img.width() > 100 and img.hasAlphaChannel()
     assert os.environ.get("APPDATA")
+
+
+def test_image_size_slider_spin_wheel_and_keys(win, qapp, tmp_path):
+    """1.0.22: đổi cỡ dấu / ảnh khi chèn: ô Cỡ (kéo hoặc gõ %), Ctrl + lăn chuột trên ảnh, phím + / −."""
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtCore import QPoint
+    tab = _open(win, qapp, tmp_path, 1)
+    win.place_library_item(win.library.items[0].id, 0, 300, 400)
+    pl = tab.view.placement
+    o = win.img_opts
+    assert o.isVisible() and o.sl_size.value() == 100
+    w0 = pl.rect.width()
+    o.sl_size.spin.setValue(150)                                   # gõ số %
+    assert pl.rect.width() == pytest.approx(w0 * 1.5, rel=0.01) and o.sl_size.slider.value() == 150
+    o.sl_size.slider.setValue(50)                                  # kéo thanh
+    assert pl.rect.width() == pytest.approx(w0 * 0.5, rel=0.01) and o.sl_size.spin.value() == 50
+    assert "mm" in o.lbl_size.text()
+    c = pl.rect.center()
+    r = tab.view._rects[0]
+    s = tab.view.scale
+    cp = QPoint(int(r.left() + c.x() * s), int(r.top() + c.y() * s))
+    vp = tab.view.canvas.mapTo(tab.view.viewport(), cp)
+    before_zoom = tab.view.zoom
+    ev = QWheelEvent(QPointF(vp), QPointF(tab.view.mapToGlobal(vp)), QPoint(0, 0), QPoint(0, 120), Qt.NoButton,
+                     Qt.ControlModifier, Qt.NoScrollPhase, False)
+    tab.view.wheelEvent(ev)                                        # Ctrl + lăn trên ảnh: đổi cỡ ảnh, không zoom trang
+    assert tab.view.zoom == before_zoom and pl.rect.width() == pytest.approx(w0 * 0.5 * 1.05, rel=0.01)
+    assert o.sl_size.value() in (52, 53)                              # ô Cỡ cập nhật theo
+    _key(tab.view, Qt.Key_Minus)
+    assert pl.rect.width() == pytest.approx(w0 * 0.5, rel=0.01)
+
+
+def test_zoom_box_typed_and_tab_list(win, qapp, tmp_path):
+    tab = _open(win, qapp, tmp_path, 1)
+    win.sp_zoom.setValue(135)                                      # gõ thẳng tỉ lệ
+    assert tab.view.zoom == 135 and win.slider.value() == 135
+    win.slider.setValue(80)
+    assert win.sp_zoom.value() == 80
+    win._fill_tab_list()
+    acts = win._tab_list_menu.actions()
+    assert len(acts) == win.tabs.count() and acts[win.tabs.currentIndex()].isChecked()
+
+
+def test_edge_buttons_hide_show_panels(win, qapp, tmp_path):
+    tab = _open(win, qapp, tmp_path, 1)
+    pump(qapp)
+    assert tab.edge_thumbs_hide.isVisible() and not tab.edge_thumbs_show.isVisible()
+    tab.edge_thumbs_hide.click()
+    pump(qapp)
+    assert tab.thumbs.isHidden() and tab.edge_thumbs_show.isVisible()
+    tab.edge_thumbs_show.click()
+    pump(qapp)
+    assert not tab.thumbs.isHidden()
+    win.side.hide_btn.click()
+    pump(qapp)
+    assert win.side.isHidden() and tab.edge_side_show.isVisible()
+    tab.edge_side_show.click()
+    assert not win.side.isHidden() and not tab.edge_side_show.isVisible()

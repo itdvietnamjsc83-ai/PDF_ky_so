@@ -120,8 +120,15 @@ class TrayPreview(QFrame):
         self.size_slider.valueChanged.connect(self._slider_moved)
         zrow.addWidget(self.size_slider, 1)
         self.lbl_zoom = QLabel("", objectName="lbl")
-        self.lbl_zoom.setMinimumWidth(44)
+        self.lbl_zoom.setVisible(False)
+        from PySide6.QtWidgets import QSpinBox
+        self.sp_zoom = QSpinBox(minimum=10, maximum=1000, value=100, suffix="%")   # 1.0.22: gõ số % được
+        self.sp_zoom.setKeyboardTracking(False)
+        self.sp_zoom.setFixedWidth(66)
+        self.sp_zoom.setToolTip("Tỉ lệ xem – gõ số rồi Enter")
+        self.sp_zoom.valueChanged.connect(self._zoom_typed)
         zrow.addWidget(self.lbl_zoom)
+        zrow.addWidget(self.sp_zoom)
         v.addLayout(zrow)
         self.picker = QListWidget(objectName="trayprev")
         self.picker.setViewMode(QListView.IconMode)
@@ -435,12 +442,18 @@ class TrayPreview(QFrame):
         cols = max(1, vw // (w + 24))
         self.picker.setGridSize(QSize(max(w + 24, vw // cols), h + 36))
         self.lbl_zoom.setText(f"{self.zoom_percent()}%")
+        self.sp_zoom.blockSignals(True)
+        self.sp_zoom.setValue(self.zoom_percent())
+        self.sp_zoom.blockSignals(False)
 
     def _resize_icons(self, *_):
         self._apply_size()
         for i in list(self._cache):
             self._set_icon(i)
         self._queue_hires()
+
+    def _zoom_typed(self, pct: int):
+        self.size_slider.setValue(int(min(MAX_W, max(MIN_W, pct * self._ref_px / 100))))
 
     def _slider_moved(self, *_):
         if self.btn_fit.isChecked():

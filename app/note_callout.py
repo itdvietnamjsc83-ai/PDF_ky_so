@@ -99,7 +99,8 @@ class NoteCallout(QFrame):
         o2.setSpacing(6)
         lbl_op = QLabel("Độ đậm", objectName="ncsub")
         o2.addWidget(lbl_op)
-        self.sl_opacity = QSlider(Qt.Horizontal, minimum=20, maximum=100, value=100)
+        from .widgets import SliderSpin
+        self.sl_opacity = SliderSpin(20, 100, 100, tooltip="Độ đậm")
         if note is not None:
             self.sl_opacity.setValue(int(note.opacity))
         o2.addWidget(self.sl_opacity, 1)

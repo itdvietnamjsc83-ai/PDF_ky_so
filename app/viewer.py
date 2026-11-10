@@ -412,9 +412,32 @@ class PageView(QScrollArea):
         vw = self.viewport().width() - 2 * MARGIN - self.verticalScrollBar().sizeHint().width()
         self.set_zoom(vw / (maxw * PX_PER_PT) * 100)
 
+    def scale_placement(self, factor: float) -> bool:
+        """Phóng to / thu nhỏ khung đang đặt quanh tâm (giữ tỉ lệ)."""
+        pl = self.placement
+        if pl is None or not pl.resizable or factor <= 0:
+            return False
+        r = pl.rect
+        w, h = r.width() * factor, r.height() * factor
+        if min(w, h) < 4:
+            return False
+        c = r.center()
+        pl.rect = QRectF(c.x() - w / 2, c.y() - h / 2, w, h)
+        if pl.on_change:
+            pl.on_change(pl)
+        self.canvas.update()
+        return True
+
     def wheelEvent(self, ev: QWheelEvent):
         if _mods(ev) & Qt.ControlModifier:
             dy = ev.angleDelta().y()
+            pl = self.placement
+            if dy and pl is not None and pl.resizable:   # Ctrl + lăn trên ảnh đang đặt: đổi cỡ ảnh, không zoom trang
+                cpos = QPointF(self.canvas.mapFrom(self.viewport(), ev.position().toPoint()))
+                if self._placement_hit(cpos) is not None:
+                    self.scale_placement(1.05 ** (dy / 120))
+                    ev.accept()
+                    return
             if dy:
                 # mỗi nấc ~10%, zoom quanh vị trí con trỏ
                 factor = 1.1 ** (dy / 120)
@@ -884,7 +907,7 @@ class PageView(QScrollArea):
             tip = f"{pl.angle:.0f}°  (giữ Shift: bước 15°)"
         else:
             tip = pl.hint or ((pl.label + " · " if pl.label else "") +
-                              ("Kéo để di chuyển, kéo góc để đổi cỡ" if pl.resizable else "Kéo để di chuyển") +
+                              ("Kéo để di chuyển, kéo góc (hoặc Ctrl + lăn chuột, phím + −) để đổi cỡ" if pl.resizable else "Kéo để di chuyển") +
                               (", kéo núm tròn để xoay" if pl.rotatable else "") +
                               ("" if pl.commit_outside else " · Bấm vào trang khác để chuyển sang trang đó") +
                               " · Enter/nháy đúp: đặt · " +
@@ -1758,6 +1781,9 @@ class PageView(QScrollArea):
                 return
             if ev.key() == Qt.Key_Escape:
                 self.cancel_placement()
+                return
+            if ev.key() in (Qt.Key_Plus, Qt.Key_Equal, Qt.Key_Minus) and not (_mods(ev) & Qt.ControlModifier):
+                self.scale_placement(1.05 if ev.key() != Qt.Key_Minus else 1 / 1.05)   # + / −: đổi cỡ ảnh
                 return
             step = 10 if _mods(ev) & Qt.ShiftModifier else 1
             d = {Qt.Key_Left: (-step, 0), Qt.Key_Right: (step, 0), Qt.Key_Up: (0, -step), Qt.Key_Down: (0, step)}

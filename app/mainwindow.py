@@ -219,6 +219,7 @@ class DocBanner(QFrame):
 
 class DocTab(QWidget):
     """Một tab = một file: thumbnail + vùng xem."""
+    panelToggle = Signal(str, bool)              # 1.0.22: nút ẩn / hiện ngay tại mép từng khu vực
 
     def __init__(self, doc: PdfDocument, colors: dict, owner=None):
         super().__init__()
@@ -252,6 +253,15 @@ class DocTab(QWidget):
         if owner is not None and hasattr(owner, "settings"):
             self.split.splitterMoved.connect(lambda *_: owner.settings.setValue("ui/thumb_w", self.thumbs.width()))
         outer.addWidget(self.split, 1)
+        # nút ẩn / hiện đặt ngay tại mép khu vực: ‹ ẩn cột trang (góc trên cột), › hiện lại (mép trái trang xem),
+        # ‹ hiện lại bảng bên phải (mép phải trang xem)
+        self.edge_thumbs_hide = self._edge_btn("‹", "Ẩn cột xem nhanh trang", lambda: self.panelToggle.emit("thumbs", False))
+        self.edge_thumbs_show = self._edge_btn("›", "Hiện cột xem nhanh trang", lambda: self.panelToggle.emit("thumbs", True))
+        self.edge_side_show = self._edge_btn("‹", "Hiện bảng bên phải", lambda: self.panelToggle.emit("side", True))
+        self.side_hidden = False
+        self.split.splitterMoved.connect(lambda *_: self.place_edges())
+        self.thumbs.installEventFilter(self)
+        self.view.installEventFilter(self)
         self.thumbs.pageClicked.connect(self.view.go_to)
         self.view.currentPageChanged.connect(self.thumbs.select_page)
         if owner:
@@ -274,6 +284,45 @@ class DocTab(QWidget):
             self.thumbs.deleteRequested.connect(owner.delete_selected_pages)
             self.thumbs.filesDropped.connect(lambda paths, at, t=self: owner.insert_files_at(t, paths, at))
 
+    def _edge_btn(self, text, tip, fn) -> QToolButton:
+        b = QToolButton(self, objectName="edgebtn", text=text, toolTip=tip)
+        b.setFixedSize(16, 30)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.clicked.connect(fn)
+        return b
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.Show, QEvent.Hide):
+            QTimer.singleShot(0, self.place_edges)
+        return super().eventFilter(obj, ev)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self.place_edges()
+
+    def place_edges(self):
+        """Đặt các nút ẩn / hiện ở mép: không che trang (nằm sát mép, nhỏ, nổi trên)."""
+        try:
+            th = not self.thumbs.isHidden()
+        except RuntimeError:
+            return
+        top = self.split.geometry().top() + 6
+        self.edge_thumbs_hide.setVisible(th)
+        self.edge_thumbs_show.setVisible(not th)
+        if th:
+            g = self.thumbs.geometry().translated(self.split.pos())
+            self.edge_thumbs_hide.move(g.right() - self.edge_thumbs_hide.width() + 1, top)
+        vg = self.view.geometry().translated(self.split.pos())
+        self.edge_thumbs_show.move(vg.left(), top)
+        sb = self.view.verticalScrollBar()
+        sbw = sb.width() if sb.isVisible() else 0
+        self.edge_side_show.setVisible(self.side_hidden)
+        self.edge_side_show.move(vg.right() - sbw - self.edge_side_show.width(), top)
+        for b in (self.edge_thumbs_hide, self.edge_thumbs_show, self.edge_side_show):
+            b.raise_()
+
     def refresh(self):
         self.view.document_changed()
         self.thumbs.rebuild()
@@ -289,6 +338,7 @@ class StartPage(QScrollArea):
     command = Signal(str)
     openPath = Signal(str)
     removeRecent = Signal(str)
+    _existsReady = Signal(int, list)           # (lượt, [còn file?]) – kiểm tra ở luồng nền
 
     def __init__(self):
         super().__init__(objectName="start")
@@ -438,22 +488,52 @@ class StartPage(QScrollArea):
             self.openPath.emit(p)
 
     def set_recent(self, paths: list[str], colors: dict):
+        """1.0.22: hiện danh sách ngay, kiểm tra "còn file không" ở luồng nền – ổ mạng / USB đã rút không làm
+        chậm lúc mở phần mềm."""
         self.recent.clear()
         for p in paths:
             name = os.path.basename(p)
-            exists = os.path.exists(p)
             ext = os.path.splitext(p)[1].lower()
             kind = "PDF" if ext == ".pdf" else ("Word" if ext.startswith(".doc") or ext in (".rtf", ".odt") else
                                                 "Excel" if ext.startswith(".xl") or ext in (".ods", ".csv") else "Office")
             bg, fg = tiles(colors)["red" if kind == "PDF" else "blue" if kind == "Word" else "green"]
-            it = QListWidgetItem(tile_icon("page", bg, fg), f"{name}\n{os.path.dirname(p)}" +
-                                 ("" if exists else "  (không còn file)"))
-            it.setData(Qt.UserRole, p if exists else "")
+            it = QListWidgetItem(tile_icon("page", bg, fg), f"{name}\n{os.path.dirname(p)}")
+            it.setData(Qt.UserRole, p)
             it.setData(Qt.UserRole + 1, p)
             it.setToolTip(p)
             self.recent.addItem(it)
         self.recent.setVisible(bool(paths))
         self.no_recent.setVisible(not paths)
+        self._recent_gen = getattr(self, "_recent_gen", 0) + 1
+        if not getattr(self, "_exists_hooked", False):
+            self._existsReady.connect(self._apply_exists)
+            self._exists_hooked = True
+        gen, lst = self._recent_gen, list(paths)
+
+        def work():
+            res = []
+            for p in lst:
+                try:
+                    res.append(os.path.exists(p))
+                except Exception:
+                    res.append(False)
+            try:
+                self._existsReady.emit(gen, res)
+            except RuntimeError:                  # cửa sổ đã đóng
+                pass
+        import threading
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_exists(self, gen: int, res: list):
+        if gen != getattr(self, "_recent_gen", 0):
+            return
+        for i, ok in enumerate(res):
+            it = self.recent.item(i)
+            if it is None or ok:
+                continue
+            p = it.data(Qt.UserRole + 1)
+            it.setText(f"{os.path.basename(p)}\n{os.path.dirname(p)}  (không còn file)")
+            it.setData(Qt.UserRole, "")
 
     def set_license(self, short: str, state: str):
         self.lic_chip.setText({"ok": "Đã kích hoạt", "warn": "Dùng thử"}.get(state, "Chưa kích hoạt"))
@@ -530,6 +610,8 @@ def _breakable(name: str) -> str:
 
 
 class SidePanel(QFrame):
+    hideRequested = Signal()
+
     def __init__(self):
         super().__init__()
         self.setObjectName("side")
@@ -546,8 +628,16 @@ class SidePanel(QFrame):
         # 1.0.22: nội dung luôn vừa đúng bề ngang bảng – tên file dài / chữ rộng không đẩy cả cột lệch ra ngoài
         self.scroll.viewport().installEventFilter(self)
         lay = self._lay = QVBoxLayout(inner)
-        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setContentsMargins(16, 10, 10, 10)
         lay.setSpacing(10)
+        # 1.0.22: nút ẩn bảng ngay tại mép trái bảng (không che nội dung: nằm trong lề 16 px)
+        self.hide_btn = QToolButton(self, objectName="edgebtn", text="›", toolTip="Ẩn bảng bên phải")
+        self.hide_btn.setFixedSize(14, 30)
+        self.hide_btn.setCursor(Qt.PointingHandCursor)
+        self.hide_btn.setFocusPolicy(Qt.NoFocus)
+        self.hide_btn.clicked.connect(self.hideRequested.emit)
+        self.hide_btn.move(1, 10)
+        self.hide_btn.raise_()
 
         self.cert_card = CertCard()
         lay.addWidget(self.cert_card)
@@ -702,6 +792,15 @@ class MainWindow(QMainWindow):
         self.start_tab.setCursor(Qt.PointingHandCursor)
         self.start_tab.clicked.connect(lambda: self.show_start_page(True))
         self.tabs.setCornerWidget(self.start_tab, Qt.TopLeftCorner)
+        # 1.0.22: mở nhiều file -> tab không nhỏ hơn ~3,5 cm (cuộn ngang); nút ▾ liệt kê mọi file đang mở để chọn nhanh
+        from PySide6.QtWidgets import QMenu
+        self.tab_list_btn = QToolButton(objectName="tablist", text="▾", toolTip="Danh sách file đang mở")
+        self.tab_list_btn.setPopupMode(QToolButton.InstantPopup)
+        self.tab_list_btn.setFixedSize(22, 20)
+        self._tab_list_menu = QMenu(self.tab_list_btn)
+        self._tab_list_menu.aboutToShow.connect(self._fill_tab_list)
+        self.tab_list_btn.setMenu(self._tab_list_menu)
+        self.tabs.setCornerWidget(self.tab_list_btn, Qt.TopRightCorner)
         self.tabs.tabBar().tabBarClicked.connect(lambda _i: self.show_start_page(False))
         self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabs.tabBar().customContextMenuRequested.connect(self._tab_menu)
@@ -872,6 +971,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.tabs)
         body.addWidget(self.stack, 1)
         self.side = SidePanel()
+        self.side.hideRequested.connect(lambda: self.set_panel_visible("side", False))
         self.side.cert_card.scanRequested.connect(self.scan_certs)
         self.side.cert_card.signRequested.connect(lambda: self.run("digisign"))
         body.addWidget(self.side)
@@ -899,6 +999,7 @@ class MainWindow(QMainWindow):
         from .ui_edit import ImageOptions
         self.img_opts = ImageOptions(self.settings)
         self.img_opts.changed.connect(self._img_opts_changed)
+        self.img_opts.sizeRequested.connect(self._img_size_requested)
         self.side.layout().insertWidget(0, self.img_opts)
         self._img_ctx = None
         from .ui_edit import fit_side_panel
@@ -930,8 +1031,8 @@ class MainWindow(QMainWindow):
             for cmd, label, ic, primary in group:
                 b = QToolButton(text=label.replace("&", "&&"), objectName="tool")
                 b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-                b.setIconSize(QSize(20, 20) if primary else QSize(24, 24))   # 1.0.22: dải thấp hơn (trước 66 px)
-                b.setMinimumHeight(52)
+                b.setIconSize(QSize(18, 18) if primary else QSize(20, 20))   # 1.0.22: dải thấp hơn (trước 66 px)
+                b.setMinimumHeight(44)
                 b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)   # hẹp thì cuộn ngang, không cắt chữ "Chè…ang"
                 b.setCursor(Qt.PointingHandCursor)
                 if primary:
@@ -1009,7 +1110,7 @@ class MainWindow(QMainWindow):
         if self.ribbon_wrap.isHidden():          # đang ẩn dải công cụ: bấm nhóm -> hiện lại
             self.set_ribbon_visible(True)
 
-    RAIL_W, RAIL_W_COMPACT = 64, 46
+    RAIL_W, RAIL_W_COMPACT = 60, 40
 
     def rail_compact(self) -> bool:
         return self.rail.width() <= self.RAIL_W_COMPACT
@@ -1019,8 +1120,8 @@ class MainWindow(QMainWindow):
         self.rail.setFixedWidth(self.RAIL_W_COMPACT if on else self.RAIL_W)
         for b, _ic in self.mode_buttons:
             b.setToolButtonStyle(Qt.ToolButtonIconOnly if on else Qt.ToolButtonTextUnderIcon)
-            b.setFixedHeight(40 if on else 50)
-        self.rail_logo.setPixmap(seal(128).pixmap(28 if on else 34, 28 if on else 34))
+            b.setFixedHeight(36 if on else 44)
+        self.rail_logo.setPixmap(seal(128).pixmap(24 if on else 30, 24 if on else 30))
         self.rail_btn.setToolTip("Mở rộng thanh bên trái (hiện tên nhóm)" if on else
                                  "Thu gọn thanh bên trái (chỉ còn biểu tượng)")
         if hasattr(self, "colors"):
@@ -1121,6 +1222,15 @@ class MainWindow(QMainWindow):
             a.blockSignals(True)
             a.setChecked(on)
             a.blockSignals(False)
+        self._refresh_edges()
+
+    def _refresh_edges(self):
+        hidden = self.side.isHidden()
+        for i in range(self.tabs.count()):
+            t = self.tabs.widget(i)
+            if isinstance(t, DocTab):
+                t.side_hidden = hidden
+                t.place_edges()
 
     def set_focus_view(self, on: bool):
         """Chỉ xem văn bản: ẩn thanh trang, nhóm công cụ, dải công cụ, bảng phải (bật lại: hiện tất cả)."""
@@ -1157,9 +1267,11 @@ class MainWindow(QMainWindow):
             if need and self.side.isHidden():
                 self.side.setVisible(True)
                 self._side_auto = True
+                self._refresh_edges()
             elif not need and self._side_auto:
                 self.side.setVisible(False)
                 self._side_auto = False
+                self._refresh_edges()
         return super().eventFilter(obj, ev)
 
     # ---------- file gần đây ----------
@@ -1339,9 +1451,18 @@ class MainWindow(QMainWindow):
         self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=400, fixedWidth=140)
         self.slider.valueChanged.connect(self._slider_moved)
         self.btn_zin = self._sbtn("zin", "Phóng to (Ctrl++)", lambda: self._view_call("zoom_step", 1))
-        self.lbl_zoom = QLabel("100%")
-        self.lbl_zoom.setFixedWidth(52)
-        for w in (self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.slider, self.btn_zin, self.lbl_zoom):
+        self.lbl_zoom = QLabel("100%")              # (giữ cho mã cũ) – số % hiện trong ô nhập bên cạnh
+        self.lbl_zoom.setVisible(False)
+        from PySide6.QtWidgets import QSpinBox
+        # 1.0.22: gõ thẳng tỉ lệ zoom (vd. 135) rồi Enter, hoặc kéo thanh bên cạnh
+        self.sp_zoom = QSpinBox(minimum=10, maximum=1600, value=100, suffix="%", objectName="zoomspin")
+        self.sp_zoom.setKeyboardTracking(False)
+        self.sp_zoom.setButtonSymbols(QSpinBox.NoButtons)
+        self.sp_zoom.setAlignment(Qt.AlignRight)
+        self.sp_zoom.setFixedWidth(56)
+        self.sp_zoom.setToolTip("Tỉ lệ xem – gõ số rồi Enter (10–1600%)")
+        self.sp_zoom.valueChanged.connect(self._slider_moved)
+        for w in (self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.slider, self.btn_zin, self.sp_zoom):
             sb.addPermanentWidget(w)
 
     def _sbtn(self, ic, tip, fn) -> QToolButton:
@@ -1389,7 +1510,7 @@ class MainWindow(QMainWindow):
         tl = tiles(c)
         for b, ic, cmd, primary in self.tool_buttons:
             b.ensurePolished()                  # bề ngang theo đúng phông của giao diện -> không bị cắt chữ khi hẹp
-            b.setMinimumWidth(max(80 if primary else 56, b.sizeHint().width()))
+            b.setMinimumWidth(max(72 if primary else 48, b.sizeHint().width()))
             if primary:
                 b.setIcon(icon(ic, c["onaccent"]))
             else:
@@ -1405,7 +1526,7 @@ class MainWindow(QMainWindow):
         self.theme_btn.setIcon(icon("sun" if c is theme.DARK else "moon", c["railtext"]))
         self.dev_btn.setIcon(icon("info", c["railtext"]))
         self.ribbon_btn.setIcon(icon("chevup" if self.ribbon_visible() else "chevdown", c["text"]))
-        self.ribbon_hide_btn.setIcon(icon("chevup", c["muted"] if "muted" in c else c["text"]))
+        self.ribbon_hide_btn.setIcon(icon("chevup", c["text"]))
         self.ribbon_handle.setIcon(icon("chevdown", c["text"]))
         for b, ic, _cmd in self.quick_buttons:
             b.setIcon(icon(ic, c["text"]))
@@ -1629,6 +1750,8 @@ class MainWindow(QMainWindow):
 
     def add_document(self, doc: PdfDocument, title: str | None = None) -> "DocTab":
         tab = DocTab(doc, self.colors, self)
+        tab.panelToggle.connect(self.set_panel_visible)
+        tab.side_hidden = self.side.isHidden()
         tab.title = title
         tab.thumbs.setVisible(self._bool_setting("ui/thumbs", True))
         tab.banner.buttons["verify"].clicked.connect(lambda: self.verify_doc(tab))
@@ -1671,6 +1794,20 @@ class MainWindow(QMainWindow):
 
     # ---------- nhiều cửa sổ: mỗi file một cửa sổ riêng (so sánh trên 2 màn hình / chia đôi màn hình) ----------
     _windows: list = []                        # giữ tham chiếu các cửa sổ phụ (không bị thu hồi bộ nhớ)
+
+    def _fill_tab_list(self):
+        m = self._tab_list_menu
+        m.clear()
+        for i in range(self.tabs.count()):
+            t = self.tabs.widget(i)
+            name = t.doc.name if isinstance(t, DocTab) else self.tabs.tabText(i)
+            a = m.addAction(("● " if isinstance(t, DocTab) and t.doc.modified else "") + name)
+            a.setCheckable(True)
+            a.setChecked(i == self.tabs.currentIndex())
+            a.setToolTip(self.tabs.tabToolTip(i))
+            a.triggered.connect(lambda _=False, k=i: (self.show_start_page(False), self.tabs.setCurrentIndex(k)))
+        if not self.tabs.count():
+            m.addAction("Chưa mở file nào").setEnabled(False)
 
     def _tab_menu(self, pos):
         from PySide6.QtWidgets import QMenu
@@ -1896,6 +2033,9 @@ class MainWindow(QMainWindow):
         self._finish_object_edit(tab)
         if not tab.doc.path:
             return self.save_as()
+        if not tab.doc.modified:                      # chưa sửa gì: không ghi lại file gốc
+            self._flash("Chưa có thay đổi nào cần lưu.")
+            return True
         if ask and tab.doc.modified and not getattr(tab, "overwrite_ok", False) and \
                 self.settings.value("save/ask", True) not in (False, "false"):
             mode = self._ask_save_mode(tab)               # tránh lưu nhầm đè lên file gốc
@@ -2167,7 +2307,7 @@ class MainWindow(QMainWindow):
             self.hand_write(tab)
             return
         elif cmd in ("protect", "printperm", "presets"):
-            self.protect_doc(tab)
+            self.protect_doc(tab, focus={"printperm": "print", "presets": "presets"}.get(cmd, ""))
             return
         elif cmd == "password":
             self.password_doc(tab)
@@ -2516,7 +2656,31 @@ class MainWindow(QMainWindow):
         if pl is not None:                         # xoay trực tiếp: kéo núm tròn phía trên khung (như Word)
             pl.rotatable = True
             pl.angle = o.angle % 360
-            pl.on_change = lambda p: self.img_opts.set_angle(p.angle)
+            pl.on_change = self._img_pl_changed
+            o.set_base_size(pl.rect.width(), pl.rect.height())
+
+    def _img_pl_changed(self, pl):
+        self.img_opts.set_angle(pl.angle)
+        self.img_opts.sync_size(pl.rect.width(), pl.rect.height())
+
+    def _img_size_requested(self, pct: float):
+        """Ô Cỡ (kéo / gõ %) -> phóng to / thu nhỏ khung ảnh quanh tâm, giữ tỉ lệ."""
+        ctx = self._img_ctx
+        base = self.img_opts.base_width()
+        if not ctx or not base:
+            return
+        view = ctx["tab"].view
+        pl = view.placement
+        if pl is None:
+            return
+        from PySide6.QtCore import QRectF
+        r = pl.rect
+        k = r.height() / max(r.width(), 1e-6)
+        w = max(4.0, base * pct / 100)
+        c = r.center()
+        pl.rect = QRectF(c.x() - w / 2, c.y() - w * k / 2, w, w * k)
+        view.canvas.update()
+        self.img_opts._show_mm(w, w * k)
 
     def _img_opts_changed(self):
         ctx = self._img_ctx
@@ -4358,8 +4522,9 @@ class MainWindow(QMainWindow):
                                rotate=rotatable)
         pl = tab.view.begin_edit(preview, page, rect0, commit, delete, cancel, "Ảnh đã chèn", angle=ang0,
                                  rotatable=rotatable)
-        pl.on_change = lambda p: self.img_opts.set_angle(p.angle)
-        self._flash("Kéo để di chuyển, kéo góc đổi cỡ, kéo núm tròn để xoay, Delete để xóa, Enter để xong, "
+        pl.on_change = self._img_pl_changed
+        self.img_opts.set_base_size(pl.rect.width(), pl.rect.height())
+        self._flash("Kéo để di chuyển, kéo góc đổi cỡ (hoặc Ctrl + lăn chuột trên ảnh), kéo núm tròn để xoay, Delete để xóa, Enter để xong, "
                     "Esc để giữ nguyên.")
 
     # ---------- giai đoạn 6: bảo vệ, công cụ ----------
@@ -5129,9 +5294,12 @@ class MainWindow(QMainWindow):
 
     def _zoom_changed(self, z):
         self.lbl_zoom.setText(f"{z}%")
-        self.slider.blockSignals(True)
+        for w in (self.slider, self.sp_zoom):
+            w.blockSignals(True)
         self.slider.setValue(min(z, 400))
-        self.slider.blockSignals(False)
+        self.sp_zoom.setValue(z)
+        for w in (self.slider, self.sp_zoom):
+            w.blockSignals(False)
 
     def _tab_changed(self, _):
         tab = self.current()
