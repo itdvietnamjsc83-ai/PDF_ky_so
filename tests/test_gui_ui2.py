@@ -59,7 +59,12 @@ def test_palette_an_trien():
 
 
 def test_rail_modes(win, qapp):
-    assert win.rail.width() == 88
+    assert win.rail.width() == win.RAIL_W == 64                         # 1.0.22: thu gọn (trước 88)
+    win.rail_btn.click()                                                 # nút ngay trên thanh: chỉ còn biểu tượng
+    assert win.rail_compact() and win.rail.width() == win.RAIL_W_COMPACT
+    assert win.mode_buttons[0][0].toolButtonStyle() == Qt.ToolButtonIconOnly
+    win.rail_btn.click()
+    assert not win.rail_compact() and win.rail.width() == 64
     assert len(win.mode_buttons) == len(MODES) == win.toolbars.count()
     win.mode_group.button(3).click()
     pump(qapp, 20)

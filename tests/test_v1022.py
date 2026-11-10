@@ -620,3 +620,28 @@ def test_original_size_remembered_after_save_and_restore(win, qapp, tmp_path):
     r = next(x for x in editing.text_runs(tab.doc, 0) if x.text.startswith("Điều khoản") and x.orig_size)
     assert r.size == 11
     win.stop_tool()
+
+
+# ------------------------------------------------------------------ dải công cụ / thanh trái gọn, bảng phải không tràn
+def test_ribbon_hide_button_and_handle(win, qapp):
+    win.set_ribbon_visible(True, save=False)
+    assert not win.ribbon_handle_wrap.isVisibleTo(win)
+    win.ribbon_hide_btn.click()                                          # nút ẩn ngay trên dải
+    assert not win.ribbon_visible() and win.ribbon_handle_wrap.isVisibleTo(win)
+    win.ribbon_handle.click()                                            # mấu nhỏ còn lại -> hiện lại
+    assert win.ribbon_visible() and not win.ribbon_handle_wrap.isVisibleTo(win)
+    b = next(b for b, ic, cmd, p in win.tool_buttons if not p)
+    assert b.minimumHeight() <= 52
+
+
+def test_side_panel_fits_long_file_name(win, qapp, samples, tmp_path):
+    import shutil
+    src = tmp_path / ("Thu_de_nghi_bao_gia_tu_van_Root_EMA_phien_ban_cuoi_cung_da_duyet_" * 2 + ".pdf")
+    shutil.copy(samples["text"], src)
+    win.resize(1000, 800)
+    win.open_files([str(src)])
+    pump(qapp, 100)
+    side = win.side
+    inner = side.scroll.widget()
+    assert inner.width() <= side.scroll.viewport().width()               # nội dung không rộng hơn bảng
+    assert side.geometry().right() <= win.centralWidget().width()

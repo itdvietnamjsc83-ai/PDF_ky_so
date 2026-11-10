@@ -506,6 +506,13 @@ class CertCard(QFrame):
             self.state.setText("Dùng gần nhất")
 
 
+def _breakable(name: str) -> str:
+    """Tên file dài không có dấu cách (a_b_c.pdf) -> cho phép xuống dòng sau _ . - để không tràn bảng."""
+    for ch in "_.-\\/":
+        name = name.replace(ch, ch + "\u200b")
+    return name
+
+
 class SidePanel(QFrame):
     def __init__(self):
         super().__init__()
@@ -517,9 +524,11 @@ class SidePanel(QFrame):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        inner = QWidget(objectName="sideinner")
+        inner = self._inner = QWidget(objectName="sideinner")
         self.scroll.setWidget(inner)
         outer.addWidget(self.scroll)
+        # 1.0.22: nội dung luôn vừa đúng bề ngang bảng – tên file dài / chữ rộng không đẩy cả cột lệch ra ngoài
+        self.scroll.viewport().installEventFilter(self)
         lay = self._lay = QVBoxLayout(inner)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
@@ -543,9 +552,18 @@ class SidePanel(QFrame):
         dl.addWidget(QLabel("Tài liệu", objectName="h"))
         self.doc_desc = QLabel("", objectName="lbl", wordWrap=True)
         self.doc_desc.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        for lb in (self.page_desc, self.doc_desc):
+            lb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            lb.setMinimumWidth(0)
         dl.addWidget(self.doc_desc)
         lay.addWidget(self.doc_card)
         lay.addStretch()
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        if obj is self.scroll.viewport() and ev.type() == QEvent.Resize:
+            self._inner.setFixedWidth(max(120, obj.width()))
+        return super().eventFilter(obj, ev)
 
     def layout(self):
         """Các thẻ nằm trong vùng cuộn (màn hình thấp vẫn xem đủ) – layout() trả về layout của các thẻ."""
@@ -575,7 +593,7 @@ class SidePanel(QFrame):
         if doc.path and os.path.exists(doc.path):
             size = f" · {os.path.getsize(doc.path) / 1048576:.2f} MB"
         sig = doc.signature_count()
-        self.doc_desc.setText(f"{doc.name}\n{doc.page_count} trang{size}\n"
+        self.doc_desc.setText(f"{_breakable(doc.name)}\n{doc.page_count} trang{size}\n"
                               f"Chữ ký số trong file: {sig if sig else 'chưa có'}")
 
 
@@ -668,15 +686,15 @@ class MainWindow(QMainWindow):
 
         # --- thanh điều hướng trái (nhóm công cụ) ---
         self.rail = QFrame(objectName="rail")
-        self.rail.setFixedWidth(88)
+        self.rail.setFixedWidth(self.RAIL_W)          # 1.0.22: thu gọn (trước 88 px) để dành chỗ xem văn bản
         rl = QVBoxLayout(self.rail)
-        rl.setContentsMargins(0, 14, 0, 12)
-        rl.setSpacing(4)
-        logo = QLabel(objectName="raillogo", alignment=Qt.AlignCenter)
-        logo.setPixmap(seal(128).pixmap(46, 46))
+        rl.setContentsMargins(0, 10, 0, 8)
+        rl.setSpacing(2)
+        logo = self.rail_logo = QLabel(objectName="raillogo", alignment=Qt.AlignCenter)
+        logo.setPixmap(seal(128).pixmap(34, 34))
         logo.setToolTip(APP_NAME)
         rl.addWidget(logo)
-        rl.addSpacing(12)
+        rl.addSpacing(8)
         self.mode_group = QButtonGroup(self)
         self.toolbars = CurrentStack()
         self.tool_buttons: list[tuple] = []
@@ -684,8 +702,8 @@ class MainWindow(QMainWindow):
         for k, (mode, label, groups) in enumerate(MODES):
             b = QToolButton(text=RAIL_LABEL.get(mode, label).replace("&", "&&"), objectName="pivot", checkable=True)
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setIconSize(QSize(22, 22))
-            b.setFixedHeight(62)
+            b.setIconSize(QSize(20, 20))
+            b.setFixedHeight(50)
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             b.setToolTip(label)
             b.setCursor(Qt.PointingHandCursor)
@@ -697,6 +715,11 @@ class MainWindow(QMainWindow):
         self.mode_group.button(0).setChecked(True)
         self.mode_group.idToggled.connect(self._rail_icons)
         rl.addStretch()
+        # nút thu gọn / mở rộng ngay trên thanh: chỉ còn biểu tượng (hẹp hơn nữa) <-> biểu tượng + chữ
+        self.rail_btn = QToolButton(objectName="railbtn")
+        self.rail_btn.setIconSize(QSize(18, 18))
+        self.rail_btn.clicked.connect(lambda: self.set_rail_compact(not self.rail_compact()))
+        rl.addWidget(self.rail_btn, 0, Qt.AlignHCenter)
         self.theme_btn = QToolButton(objectName="railbtn", toolTip="Đổi giao diện sáng/tối")
         self.theme_btn.setIconSize(QSize(20, 20))
         self.theme_btn.clicked.connect(self.toggle_theme)
@@ -716,11 +739,10 @@ class MainWindow(QMainWindow):
         # --- hàng tiêu đề: tên nhóm, bản quyền, tìm kiếm, ẩn/hiện dải công cụ ---
         top = QFrame(objectName="topbar")
         th = QHBoxLayout(top)
-        th.setContentsMargins(18, 10, 14, 6)
-        th.setSpacing(10)
-        self.lbl_title = QLabel(MODES[0][1], objectName="title")
-        th.addWidget(self.lbl_title)
-        th.addStretch()
+        th.setContentsMargins(8, 4, 10, 2)          # 1.0.22: một hàng duy nhất sát mép trên (dải công cụ + tìm kiếm)
+        th.setSpacing(6)
+        self.lbl_title = QLabel(MODES[0][1], objectName="title")     # tên nhóm: đã có trên thanh trái -> ẩn
+        self.lbl_title.setVisible(False)
         self.lic_chip = QLabel("", objectName="chip")
         self.lic_chip.setCursor(Qt.PointingHandCursor)
         self.lic_chip.setVisible(False)
@@ -749,14 +771,34 @@ class MainWindow(QMainWindow):
         # --- dải công cụ (ẩn/hiện được) ---
         self.ribbon = QFrame(objectName="ribbon")
         rb = QHBoxLayout(self.ribbon)
-        rb.setContentsMargins(8, 6, 8, 6)
+        rb.setContentsMargins(6, 2, 4, 2)
+        rb.setSpacing(2)
         self.ribbon_scroll = RibbonScroll(self.toolbars)
         rb.addWidget(self.ribbon_scroll)
+        # 1.0.22: nút ẩn ngay trên dải công cụ (góc phải)
+        self.ribbon_hide_btn = QToolButton(objectName="stripbtn", toolTip="Ẩn dải công cụ (Ctrl+F1)")
+        self.ribbon_hide_btn.setIconSize(QSize(14, 14))
+        self.ribbon_hide_btn.clicked.connect(lambda: self.set_ribbon_visible(False))
+        rb.addWidget(self.ribbon_hide_btn, 0, Qt.AlignTop)
         self.ribbon_wrap = QWidget()
         rw = QHBoxLayout(self.ribbon_wrap)
-        rw.setContentsMargins(14, 2, 14, 8)
+        rw.setContentsMargins(0, 0, 0, 0)
         rw.addWidget(self.ribbon)
-        v.addWidget(self.ribbon_wrap)
+        th.insertWidget(0, self.ribbon_wrap, 1)
+        # dải đã ẩn: còn một mấu nhỏ ngay chỗ đó để hiện lại
+        self.ribbon_handle_wrap = QWidget()
+        hw = QHBoxLayout(self.ribbon_handle_wrap)
+        hw.setContentsMargins(0, 0, 0, 0)
+        self.ribbon_handle = QToolButton(objectName="striphandle", text="Hiện dải công cụ",
+                                         toolTip="Hiện dải công cụ (Ctrl+F1)")
+        self.ribbon_handle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.ribbon_handle.setIconSize(QSize(12, 12))
+        self.ribbon_handle.setCursor(Qt.PointingHandCursor)
+        self.ribbon_handle.clicked.connect(lambda: self.set_ribbon_visible(True))
+        hw.addWidget(self.ribbon_handle)
+        hw.addStretch()
+        self.ribbon_handle_wrap.setVisible(False)
+        th.insertWidget(1, self.ribbon_handle_wrap, 1)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -824,8 +866,9 @@ class MainWindow(QMainWindow):
             for cmd, label, ic, primary in group:
                 b = QToolButton(text=label.replace("&", "&&"), objectName="tool")
                 b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-                b.setIconSize(QSize(26, 26) if primary else QSize(32, 32))
-                b.setMinimumHeight(66)
+                b.setIconSize(QSize(20, 20) if primary else QSize(24, 24))   # 1.0.22: dải thấp hơn (trước 66 px)
+                b.setMinimumHeight(52)
+                b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)   # hẹp thì cuộn ngang, không cắt chữ "Chè…ang"
                 b.setCursor(Qt.PointingHandCursor)
                 if primary:
                     b.setProperty("primary", True)
@@ -847,12 +890,32 @@ class MainWindow(QMainWindow):
         if self.ribbon_wrap.isHidden():          # đang ẩn dải công cụ: bấm nhóm -> hiện lại
             self.set_ribbon_visible(True)
 
+    RAIL_W, RAIL_W_COMPACT = 64, 46
+
+    def rail_compact(self) -> bool:
+        return self.rail.width() <= self.RAIL_W_COMPACT
+
+    def set_rail_compact(self, on: bool, save: bool = True):
+        """1.0.22: thanh nhóm công cụ bên trái chỉ còn biểu tượng (hẹp) hoặc biểu tượng + chữ – nhớ cho lần sau."""
+        self.rail.setFixedWidth(self.RAIL_W_COMPACT if on else self.RAIL_W)
+        for b, _ic in self.mode_buttons:
+            b.setToolButtonStyle(Qt.ToolButtonIconOnly if on else Qt.ToolButtonTextUnderIcon)
+            b.setFixedHeight(40 if on else 50)
+        self.rail_logo.setPixmap(seal(128).pixmap(28 if on else 34, 28 if on else 34))
+        self.rail_btn.setToolTip("Mở rộng thanh bên trái (hiện tên nhóm)" if on else
+                                 "Thu gọn thanh bên trái (chỉ còn biểu tượng)")
+        if hasattr(self, "colors"):
+            self.rail_btn.setIcon(icon("chevright" if on else "chevleft", self.colors["railtext"]))
+        if save:
+            self.settings.setValue("ui/rail_compact", on)
+
     def ribbon_visible(self) -> bool:
         return not self.ribbon_wrap.isHidden()
 
     def set_ribbon_visible(self, on: bool, save: bool = True):
         """Ẩn/hiện dải công cụ chính (Ctrl+F1) – nhớ lựa chọn cho lần mở sau."""
         self.ribbon_wrap.setVisible(on)
+        self.ribbon_handle_wrap.setVisible(not on)
         self.ribbon_btn.setChecked(not on)
         self.ribbon_btn.setToolTip("Ẩn thanh công cụ (Ctrl+F1)" if on else "Hiện thanh công cụ (Ctrl+F1)")
         if save:
@@ -893,6 +956,7 @@ class MainWindow(QMainWindow):
         self.layout_btn.setMenu(m)
         for key in ("thumbs", "rail", "side"):
             self.set_panel_visible(key, self._bool_setting(f"ui/{key}", True), save=False)
+        self.set_rail_compact(self._bool_setting("ui/rail_compact", False), save=False)
 
     def panel_visible(self, key: str) -> bool:
         if key == "ribbon":
@@ -1195,6 +1259,8 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(css)
         tl = tiles(c)
         for b, ic, cmd, primary in self.tool_buttons:
+            b.ensurePolished()                  # bề ngang theo đúng phông của giao diện -> không bị cắt chữ khi hẹp
+            b.setMinimumWidth(max(80 if primary else 56, b.sizeHint().width()))
             if primary:
                 b.setIcon(icon(ic, c["onaccent"]))
             else:
@@ -1210,6 +1276,9 @@ class MainWindow(QMainWindow):
         self.theme_btn.setIcon(icon("sun" if c is theme.DARK else "moon", c["railtext"]))
         self.dev_btn.setIcon(icon("info", c["railtext"]))
         self.ribbon_btn.setIcon(icon("chevup" if self.ribbon_visible() else "chevdown", c["text"]))
+        self.ribbon_hide_btn.setIcon(icon("chevup", c["muted"] if "muted" in c else c["text"]))
+        self.ribbon_handle.setIcon(icon("chevdown", c["text"]))
+        self.rail_btn.setIcon(icon("chevright" if self.rail_compact() else "chevleft", c["railtext"]))
         self.layout_btn.setIcon(icon("layout", c["text"]))
         self.empty.apply_colors(c)
         self.refresh_recent()

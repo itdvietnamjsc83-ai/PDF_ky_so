@@ -69,6 +69,8 @@ P = {
     "window": '<rect x="2.5" y="5.5" width="11" height="10" rx="1.5"/><path d="M6.5 5.5V4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 17.5 4v7a1.5 1.5 0 0 1-1.5 1.5h-2.5"/>',
     "chevup": '<path d="M5 12.5 10 7.5l5 5"/>',
     "chevdown": '<path d="M5 7.5 10 12.5l5-5"/>',
+    "chevleft": '<path d="M12.5 5 7.5 10l5 5"/>',
+    "chevright": '<path d="M7.5 5l5 5-5 5"/>',
     "ribbon": '<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M2.5 8h15M6 5.8h.01M9 5.8h.01"/>',
     "usb": '<rect x="7" y="9" width="6" height="8.5" rx="1"/><path d="M8 9V3.5h4V9M9 5.5h.01M11 5.5h.01"/>',
     "recent": '<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>',

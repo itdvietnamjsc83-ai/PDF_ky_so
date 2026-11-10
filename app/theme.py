@@ -111,12 +111,12 @@ QToolTip {{ background: {c['rail']}; color: #FFFFFF; border: 0; padding: 5px 9px
 /* ---- thanh điều hướng trái ---- */
 QFrame#rail {{ background: {c['rail']}; border: 0; }}
 QLabel#raillogo {{ background: transparent; }}
-QToolButton#pivot {{ border: 0; border-radius: 10px; padding: 8px 2px 7px 2px; margin: 0 8px;
-  color: {c['railtext']}; background: transparent; font-size: 11px; font-weight: 500; }}
+QToolButton#pivot {{ border: 0; border-radius: 9px; padding: 5px 1px 4px 1px; margin: 0 5px;
+  color: {c['railtext']}; background: transparent; font-size: 10px; font-weight: 500; }}
 QToolButton#pivot:hover {{ background: {c['railsel']}; color: #FFFFFF; }}
 QToolButton#pivot:checked {{ background: {c['railsel']}; color: #FFFFFF; font-weight: 700;
   border-left: 3px solid {c['railmark']}; }}
-QToolButton#railbtn {{ border: 0; border-radius: 10px; padding: 8px; margin: 0 8px; background: transparent; }}
+QToolButton#railbtn {{ border: 0; border-radius: 9px; padding: 6px; margin: 0 5px; background: transparent; }}
 QToolButton#railbtn:hover {{ background: {c['railsel']}; }}
 
 /* ---- hàng tiêu đề ---- */
@@ -126,7 +126,7 @@ QLabel#chip {{ background: {c['sel']}; color: {c['accent']}; border-radius: 12px
   font-size: 12px; font-weight: 600; }}
 QLabel#chip[state="ok"] {{ background: {tiles(c)['green'][0]}; color: {tiles(c)['green'][1]}; }}
 QLabel#chip[state="warn"] {{ background: {tiles(c)['amber'][0]}; color: {tiles(c)['amber'][1]}; }}
-QToolButton#flat {{ border: 1px solid {c['stroke']}; border-radius: 8px; padding: 6px; background: {c['card']}; }}
+QToolButton#flat {{ border: 1px solid {c['stroke']}; border-radius: 8px; padding: 4px; background: {c['card']}; }}
 QToolButton#flat:hover {{ background: {c['hover']}; }}
 QToolButton#flat:checked {{ background: {c['sel']}; border-color: {c['accent']}; }}
 
@@ -135,7 +135,7 @@ QTabWidget::pane {{ border: 0; }}
 QTabBar {{ background: {c['bg']}; qproperty-drawBase: 0; border: 0; }}
 QToolButton#tabclose {{ border: 0; border-radius: 4px; padding: 2px; background: transparent; }}
 QToolButton#tabclose:hover {{ background: {c['hover']}; }}
-QTabBar::tab {{ background: transparent; padding: 8px 14px; margin: 4px 3px 0 3px; border-top-left-radius: 10px;
+QTabBar::tab {{ background: transparent; padding: 4px 12px; margin: 2px 3px 0 3px; border-top-left-radius: 10px;
   border-top-right-radius: 10px; min-width: 120px; max-width: 260px; color: {c['text2']}; }}
 QTabBar::tab:selected {{ background: {c['card']}; color: {c['text']}; font-weight: 600;
   border-top: 2px solid {c['accent']}; }}
@@ -153,16 +153,21 @@ QPushButton#bannerbtn {{ padding: 4px 10px; font-size: 12px; }}
 QToolButton#bannerclose {{ border: 0; background: transparent; padding: 2px 4px; }}
 
 /* ---- dải công cụ ---- */
-QFrame#ribbon {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 14px; }}
+QFrame#ribbon {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 10px; }}
 QFrame#toolbar {{ background: transparent; border: 0; }}
-QToolButton#tool {{ border: 1px solid transparent; border-radius: 10px; padding: 4px 6px; min-width: 64px;
+QToolButton#tool {{ border: 1px solid transparent; border-radius: 9px; padding: 2px 4px;
   font-size: 11px; font-weight: 500; background: transparent; color: {c['text']}; }}
 QToolButton#tool:hover {{ background: {c['hover']}; border-color: {c['stroke']}; }}
 QToolButton#tool:pressed {{ background: {c['press']}; }}
 QToolButton#tool[primary="true"] {{ background: {c['accent']}; color: {c['onaccent']}; border-radius: 12px;
-  padding: 6px 14px; min-width: 88px; font-size: 13px; font-weight: 700; }}
+  padding: 4px 12px; font-size: 12px; font-weight: 700; }}
 QToolButton#tool[primary="true"]:hover {{ background: {c['accent2']}; }}
-QFrame#vsep {{ background: {c['stroke']}; max-width: 1px; min-width: 1px; margin: 10px 6px; }}
+QFrame#vsep {{ background: {c['stroke']}; max-width: 1px; min-width: 1px; margin: 8px 5px; }}
+QToolButton#stripbtn {{ border: 0; border-radius: 6px; padding: 2px; background: transparent; }}
+QToolButton#stripbtn:hover {{ background: {c['hover']}; }}
+QToolButton#striphandle {{ border: 1px solid {c['stroke']}; border-radius: 8px;
+  padding: 3px 10px; font-size: 11px; background: {c['card']}; color: {c['text']}; }}
+QToolButton#striphandle:hover {{ background: {c['hover']}; }}
 
 /* ---- vùng xem, thumbnail ---- */
 QScrollArea#viewer, QWidget#pages {{ background: {c['canvas']}; border: 0; }}
@@ -244,7 +249,7 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border;
   width: 18px; border: 0; background: transparent; }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up}"); width: 10px; height: 10px; }}
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{down}"); width: 10px; height: 10px; }}
-QLineEdit#search {{ border-radius: 17px; padding: 6px 14px; background: {c['card']}; }}
+QLineEdit#search {{ border-radius: 14px; padding: 4px 12px; background: {c['card']}; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {c['accent']}; border: 1px solid {c['accent']}; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {c['strong']};
   background: {c['card']}; border-radius: 4px; }}
