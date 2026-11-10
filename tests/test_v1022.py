@@ -31,6 +31,7 @@ def test_window_can_shrink_for_split_screen(win, qapp, samples):
 
 
 def test_hide_panels_and_focus_view(win, qapp, samples, tmp_path):
+    win.set_layout_style("rail", save=False)            # cột trái chỉ có ở kiểu "cột trái"
     win.open_files([samples["text"]])
     pump(qapp)
     tab = win.current()
@@ -645,3 +646,48 @@ def test_side_panel_fits_long_file_name(win, qapp, samples, tmp_path):
     inner = side.scroll.widget()
     assert inner.width() <= side.scroll.viewport().width()               # nội dung không rộng hơn bảng
     assert side.geometry().right() <= win.centralWidget().width()
+
+
+def test_layout_styles_quick_bar_and_start_tab(win, qapp, samples):
+    """Kiểu tab ngang như Foxit (mặc định) <-> kiểu cột trái; thanh truy cập nhanh; tab "Bắt đầu"."""
+    win.set_layout_style("tabs", save=False)
+    pump(qapp, 20)
+    assert not win.rail.isVisible() and all(t.isVisible() for t in win.mode_tabs)
+    win.mode_tabs[2].click()
+    assert win.mode_group.checkedId() == 2 and win.mode_tabs[2].isChecked() and not win.mode_tabs[0].isChecked()
+    assert {c for _b, _i, c in win.quick_buttons} == {"open", "save", "print", "undo", "redo"}
+    win.set_layout_style("rail", save=False)
+    pump(qapp, 20)
+    assert win.rail.isVisible() and not win.mode_tabs[0].isVisible()
+    assert win.quick_buttons[0][0].isVisible()                     # thanh nhanh có ở cả hai kiểu
+    win.set_layout_style("tabs", save=False)
+    win.open_files([samples["text"]])
+    pump(qapp, 50)
+    win.start_tab.click()
+    pump(qapp, 20)
+    ov = win.start_overlay
+    assert ov.isVisible() and win.tabs.tabBar().isVisible()        # hàng tab file vẫn còn
+    win.tabs.tabBar().tabBarClicked.emit(0)
+    assert not ov.isVisible()
+    win.start_tab.click()
+    win.open_files([samples["mixed"]])
+    pump(qapp, 50)
+    assert not ov.isVisible()                                       # mở file mới -> về tài liệu
+
+
+def test_thumbnail_column_resizable(win, qapp, samples):
+    """Kéo vạch ngăn: cột ảnh thu nhỏ rộng / hẹp tùy ý, ảnh to nhỏ theo, nhớ độ rộng cho lần mở sau."""
+    win.open_files([samples["text"]])
+    pump(qapp, 50)
+    tab = win.current()
+    th = tab.thumbs
+    tab.split.setSizes([300, 900])
+    tab.split.splitterMoved.emit(300, 1)
+    pump(qapp, 250)
+    th._apply_width()
+    assert th.thumb_w > 200 and th.iconSize().width() == th.thumb_w
+    assert int(win.settings.value("ui/thumb_w")) >= 250
+    tab.split.setSizes([70, 1100])
+    pump(qapp, 50)
+    th._apply_width()
+    assert th.thumb_w < 80

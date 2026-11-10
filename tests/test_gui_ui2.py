@@ -43,7 +43,7 @@ def test_ui_font_bundled_and_loaded(qapp):
     from app.fonts import assets_dir
     d = os.path.join(assets_dir(), "fonts", "ui")
     files = sorted(f for f in os.listdir(d) if f.endswith(".ttf"))
-    assert len(files) == 5 and os.path.exists(os.path.join(d, "OFL.txt"))
+    assert len(files) == 6 and "BeVietnamPro-Light.ttf" in files and os.path.exists(os.path.join(d, "OFL.txt"))
     assert theme.load_fonts() == "Be Vietnam Pro"
     assert "Be Vietnam Pro" in QFontDatabase.families()
     assert '"Be Vietnam Pro"' in theme.stylesheet(theme.LIGHT)
@@ -156,7 +156,10 @@ def test_theme_toggle_keeps_layout(win, qapp):
     pump(qapp, 20)
     win.toggle_theme()
     assert win.colors in (theme.LIGHT, theme.DARK)
-    assert win.rail.isVisible()
+    if win.layout_style() == "rail":
+        assert win.rail.isVisible()
+    else:                                                    # 1.0.22: kiểu tab ngang (Foxit) mặc định
+        assert win.mode_tabs[0].isVisible() and not win.rail.isVisible()
 
 
 def test_developer_dialog(qapp, win, monkeypatch):

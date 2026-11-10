@@ -396,6 +396,9 @@ Khi đặt ảnh, con dấu, chữ ký ảnh, nét chữ tay của mình lên tr
 
 - Đã bỏ tính năng **Gửi email** (nút trên thanh Trang chủ, MAPI/Mail) theo yêu cầu.
 - **Hộp thoại In mới (kiểu Foxit/Adobe, `app/print_dialog.py` + `app/printing.py`):** xem trước đúng như bản in, chọn máy in + Thuộc tính, số bản, đối chiếu, in 2 mặt, đen trắng, kèm ghi chú; phạm vi (tất cả / trang hiện tại / 1-3,5,8-), chỉ trang lẻ/chẵn, in ngược; cỡ in: vừa khổ / chỉ thu nhỏ trang quá khổ / 100% / tùy chỉnh 10–400% (nút nhanh 50…200%, ±10%); nhiều trang/tờ (2, 4, 6, 9, 16) có kẻ viền; khổ giấy, hướng giấy, tự xoay, căn giữa, lề thêm; lưu thành PDF. Nhớ lựa chọn cho lần sau.
+- **Bố cục kiểu Foxit (mặc định, đổi ở nút Bố cục):** các nhóm thành tab ngang trên cùng + thanh truy cập nhanh (Mở, Lưu, In, Hoàn tác, Làm lại); tab "Bắt đầu" ở đầu hàng tab file; tab file kiểu thẻ, tên dài giữ đầu + đuôi. Vẫn chọn được kiểu cột trái cũ.
+- **Cột ảnh thu nhỏ kéo rộng/hẹp được** (vạch ngăn), ảnh to nhỏ theo, nhớ độ rộng.
+- **Phông giao diện nét mảnh:** Be Vietnam Pro Light (300) cho chữ thường, các mức đậm giảm một bậc.
 - **Máy in ảo thứ 3 "PDF Ky so - Mo file":** in từ Word/Excel -> chỉ mở thành PDF trong phần mềm, không bật ký số (macOS: mục "Chỉ chuyển thành PDF trong PDF Ký Số" trong nút PDF ▾). Cần chạy lại bộ cài để tạo máy in.
 - **Sửa chữ giữ nguyên cỡ:** gõ thêm chữ thì dòng kéo dài sang phải tới chữ bên cạnh / lề phải trang, không thu nhỏ; hết chỗ mới co ngang chữ (tối đa 80%, giữ chiều cao) cho vừa 1 dòng, quá dài mới giảm cỡ. Cỡ do người dùng chọn luôn được giữ.
 - **Cỡ chữ gốc:** ô cỡ chữ hiện đúng cỡ của dòng đang sửa (làm tròn 12.98 -> 13); cỡ gốc được ghi vào chữ đã sửa (marked content `PdfKySoGoc`, còn sau khi lưu) – nút ↺ trên thanh định dạng đưa về đúng cỡ gốc.

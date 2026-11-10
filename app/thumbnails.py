@@ -9,6 +9,7 @@ from .document import PdfDocument
 from .viewer import to_qimage
 
 THUMB_W = 112
+MIN_W, MAX_W, PAD = 56, 420, 56
 BATCH = 4          # số trang render mỗi lượt
 
 
@@ -29,9 +30,12 @@ class ThumbnailList(QListWidget):
         self.setWrapping(False)
         self.setMovement(QListView.Static)
         self.setResizeMode(QListView.Adjust)
-        self.setIconSize(QSize(THUMB_W, int(THUMB_W * 1.42)))
+        self.thumb_w = THUMB_W                    # 1.0.22: cột kéo rộng / hẹp được -> ảnh to nhỏ theo
+        self.setIconSize(QSize(self.thumb_w, int(self.thumb_w * 1.42)))
         self.setSpacing(4)
-        self.setFixedWidth(THUMB_W + 56)
+        self.setMinimumWidth(MIN_W + PAD)
+        self.setMaximumWidth(MAX_W + PAD)
+        self._resize_timer = QTimer(self, singleShot=True, interval=150, timeout=self._apply_width)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDragDropMode(QAbstractItemView.InternalMove)   # kéo thả để sắp xếp trang
         self.setDefaultDropAction(Qt.MoveAction)
@@ -49,10 +53,31 @@ class ThumbnailList(QListWidget):
         self.verticalScrollBar().valueChanged.connect(lambda *_: self._timer.start())
         self.rebuild()
 
+    def sizeHint(self):
+        return QSize(self.thumb_w + PAD, 400)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        if abs((self.width() - PAD) - self.thumb_w) > 3:
+            self._resize_timer.start()
+
+    def _apply_width(self):
+        """Đổi cỡ ảnh thu nhỏ theo bề ngang cột (kéo vạch ngăn giữa cột ảnh và trang)."""
+        w = max(MIN_W, min(MAX_W, self.width() - PAD))
+        if w == self.thumb_w:
+            return
+        self.thumb_w = w
+        self.setIconSize(QSize(w, int(w * 1.42)))
+        for i in range(self.count()):
+            self.item(i).setIcon(self._placeholder(i))
+        self._done.clear()
+        self._timer.start()
+
     def _placeholder(self, i: int) -> QIcon:
         w, h = self.doc.page_size_pt(i)
-        th = int(THUMB_W * h / w) if w else THUMB_W
-        pm = QPixmap(THUMB_W, max(th, 20))
+        tw = self.thumb_w
+        th = int(tw * h / w) if w else tw
+        pm = QPixmap(tw, max(th, 20))
         pm.fill(QColor("#ffffff"))
         return QIcon(pm)
 
@@ -96,7 +121,7 @@ class ThumbnailList(QListWidget):
         dpr = self.devicePixelRatioF()
         for i in todo[:BATCH]:
             w, _ = self.doc.page_size_pt(i)
-            img = to_qimage(self.doc.render(i, THUMB_W * dpr / w))
+            img = to_qimage(self.doc.render(i, self.thumb_w * dpr / w))
             pm = QPixmap.fromImage(img)
             pm.setDevicePixelRatio(dpr)
             framed = QPixmap(pm.size())

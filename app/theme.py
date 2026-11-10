@@ -104,7 +104,8 @@ def stylesheet(c: dict) -> str:
     except OSError:
         down = up = ""
     return f"""
-* {{ font-family: "{fam}", "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 13px; color: {c['text']}; }}
+* {{ font-family: "{fam}", "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 13px; font-weight: 300;
+  color: {c['text']}; }}
 QMainWindow, QWidget#root, QDialog {{ background: {c['bg']}; }}
 QToolTip {{ background: {c['rail']}; color: #FFFFFF; border: 0; padding: 5px 9px; border-radius: 6px; }}
 
@@ -114,16 +115,16 @@ QLabel#raillogo {{ background: transparent; }}
 QToolButton#pivot {{ border: 0; border-radius: 9px; padding: 5px 1px 4px 1px; margin: 0 5px;
   color: {c['railtext']}; background: transparent; font-size: 10px; font-weight: 500; }}
 QToolButton#pivot:hover {{ background: {c['railsel']}; color: #FFFFFF; }}
-QToolButton#pivot:checked {{ background: {c['railsel']}; color: #FFFFFF; font-weight: 700;
+QToolButton#pivot:checked {{ background: {c['railsel']}; color: #FFFFFF; font-weight: 600;
   border-left: 3px solid {c['railmark']}; }}
 QToolButton#railbtn {{ border: 0; border-radius: 9px; padding: 6px; margin: 0 5px; background: transparent; }}
 QToolButton#railbtn:hover {{ background: {c['railsel']}; }}
 
 /* ---- hàng tiêu đề ---- */
 QFrame#topbar {{ background: {c['bg']}; border: 0; }}
-QLabel#title {{ font-size: 18px; font-weight: 800; }}
+QLabel#title {{ font-size: 18px; font-weight: 700; }}
 QLabel#chip {{ background: {c['sel']}; color: {c['accent']}; border-radius: 12px; padding: 4px 12px;
-  font-size: 12px; font-weight: 600; }}
+  font-size: 12px; font-weight: 500; }}
 QLabel#chip[state="ok"] {{ background: {tiles(c)['green'][0]}; color: {tiles(c)['green'][1]}; }}
 QLabel#chip[state="warn"] {{ background: {tiles(c)['amber'][0]}; color: {tiles(c)['amber'][1]}; }}
 QToolButton#flat {{ border: 1px solid {c['stroke']}; border-radius: 8px; padding: 4px; background: {c['card']}; }}
@@ -131,15 +132,22 @@ QToolButton#flat:hover {{ background: {c['hover']}; }}
 QToolButton#flat:checked {{ background: {c['sel']}; border-color: {c['accent']}; }}
 
 /* ---- tab file ---- */
-QTabWidget::pane {{ border: 0; }}
 QTabBar {{ background: {c['bg']}; qproperty-drawBase: 0; border: 0; }}
 QToolButton#tabclose {{ border: 0; border-radius: 4px; padding: 2px; background: transparent; }}
 QToolButton#tabclose:hover {{ background: {c['hover']}; }}
-QTabBar::tab {{ background: transparent; padding: 4px 12px; margin: 2px 3px 0 3px; border-top-left-radius: 10px;
-  border-top-right-radius: 10px; min-width: 120px; max-width: 260px; color: {c['text2']}; }}
-QTabBar::tab:selected {{ background: {c['card']}; color: {c['text']}; font-weight: 600;
+QTabBar::tab {{ background: {c['hover']}; padding: 4px 10px 4px 14px; margin: 3px 0 0 2px; border: 1px solid {c['stroke']};
+  border-bottom: 0; border-top-left-radius: 9px; border-top-right-radius: 9px; min-width: 110px; max-width: 240px;
+  color: {c['text2']}; }}
+QTabBar::tab:selected {{ background: {c['card']}; color: {c['text']}; font-weight: 500; margin-top: 1px;
   border-top: 2px solid {c['accent']}; }}
-QTabBar::tab:hover:!selected {{ background: {c['hover']}; }}
+QTabBar::tab:hover:!selected {{ background: {c['card']}; color: {c['text']}; }}
+QTabWidget::pane {{ border-top: 1px solid {c['stroke']}; }}
+QToolButton#starttab {{ background: {c['hover']}; border: 1px solid {c['stroke']}; border-bottom: 0;
+  border-top-left-radius: 9px; border-top-right-radius: 9px; padding: 4px 12px; margin: 3px 0 0 8px;
+  color: {c['text2']}; }}
+QToolButton#starttab:hover {{ background: {c['card']}; color: {c['text']}; }}
+QToolButton#starttab:checked {{ background: {c['card']}; color: {c['text']}; font-weight: 500;
+  border-top: 2px solid {c['accent']}; }}
 
 /* ---- dải cảnh báo trên tài liệu ---- */
 QFrame#banner {{ border: 0; border-bottom: 1px solid {c['stroke']}; background: {tiles(c)['amber'][0]}; }}
@@ -160,9 +168,19 @@ QToolButton#tool {{ border: 1px solid transparent; border-radius: 9px; padding: 
 QToolButton#tool:hover {{ background: {c['hover']}; border-color: {c['stroke']}; }}
 QToolButton#tool:pressed {{ background: {c['press']}; }}
 QToolButton#tool[primary="true"] {{ background: {c['accent']}; color: {c['onaccent']}; border-radius: 12px;
-  padding: 4px 12px; font-size: 12px; font-weight: 700; }}
+  padding: 4px 12px; font-size: 12px; font-weight: 600; }}
 QToolButton#tool[primary="true"]:hover {{ background: {c['accent2']}; }}
 QFrame#vsep {{ background: {c['stroke']}; max-width: 1px; min-width: 1px; margin: 8px 5px; }}
+QSplitter#docsplit::handle {{ background: transparent; border-left: 1px solid {c['stroke']}; }}
+QSplitter#docsplit::handle:hover {{ background: {c['accent']}; }}
+QFrame#quickrow {{ background: {c['bg']}; border: 0; }}
+QToolButton#qa {{ border: 0; border-radius: 5px; padding: 0; margin: 0; background: transparent; }}
+QToolButton#qa:hover {{ background: {c['hover']}; }}
+QToolButton#qa:disabled {{ background: transparent; }}
+QToolButton#modetab {{ border: 0; border-bottom: 2px solid transparent; padding: 4px 10px 3px 10px;
+  background: transparent; color: {c['text2']}; font-size: 12px; font-weight: 500; }}
+QToolButton#modetab:hover {{ color: {c['text']}; background: {c['hover']}; border-radius: 5px; }}
+QToolButton#modetab:checked {{ color: {c['accent']}; border-bottom: 2px solid {c['accent']}; }}
 QToolButton#stripbtn {{ border: 0; border-radius: 6px; padding: 2px; background: transparent; }}
 QToolButton#stripbtn:hover {{ background: {c['hover']}; }}
 QToolButton#striphandle {{ border: 1px solid {c['stroke']}; border-radius: 8px;
@@ -182,32 +200,32 @@ QScrollArea#sidescroll, QWidget#sideinner {{ background: {c['bg']}; border: 0; }
 QFrame#card {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 14px; }}
 QFrame#cert {{ background: {c['cert']}; border: 0; border-radius: 14px; }}
 QFrame#cert QLabel {{ color: {c['certtext']}; background: transparent; }}
-QFrame#cert QLabel#certcap {{ color: #AEB6C9; font-size: 10px; font-weight: 700; letter-spacing: 1px; }}
-QFrame#cert QLabel#certname {{ font-size: 14px; font-weight: 700; }}
+QFrame#cert QLabel#certcap {{ color: #AEB6C9; font-size: 10px; font-weight: 600; letter-spacing: 1px; }}
+QFrame#cert QLabel#certname {{ font-size: 14px; font-weight: 600; }}
 QFrame#cert QLabel#certsub {{ color: #AEB6C9; font-size: 11px; }}
 QFrame#cert QPushButton {{ background: #2A3658; color: #FFFFFF; border: 0; border-radius: 8px; padding: 5px 10px;
   font-size: 12px; }}
 QFrame#cert QPushButton:hover {{ background: #34426B; }}
-QLabel#h {{ font-weight: 700; }}
-QLabel#cap {{ color: {c['text2']}; font-size: 10px; font-weight: 700; letter-spacing: 1px; }}
+QLabel#h {{ font-weight: 600; }}
+QLabel#cap {{ color: {c['text2']}; font-size: 10px; font-weight: 600; letter-spacing: 1px; }}
 QLabel#lbl {{ color: {c['text2']}; font-size: 12px; }}
 QLabel#badge {{ background: {c['sel']}; color: {c['accent']}; border-radius: 10px; padding: 2px 9px;
-  font-size: 11px; font-weight: 600; }}
+  font-size: 11px; font-weight: 500; }}
 
 /* ---- trang bắt đầu ---- */
 QScrollArea#start {{ background: {c['bg']}; border: 0; }}
-QLabel#hero {{ font-size: 26px; font-weight: 800; }}
+QLabel#hero {{ font-size: 26px; font-weight: 700; }}
 QFrame#drop {{ background: {c['rail']}; border-radius: 18px; }}
 QFrame#drop QLabel {{ color: #FFFFFF; background: transparent; }}
 QFrame#drop QLabel#dropsub {{ color: #AEB6C9; }}
 QFrame#drop QPushButton {{ background: {c['accent']}; color: #FFFFFF; border: 0; border-radius: 10px;
-  padding: 9px 20px; font-weight: 700; }}
+  padding: 9px 20px; font-weight: 600; }}
 QFrame#drop QPushButton:hover {{ background: {c['accent2']}; }}
 QToolButton#quick {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 14px;
-  padding: 12px 8px; font-weight: 600; }}
+  padding: 12px 8px; font-weight: 500; }}
 QToolButton#quick:hover {{ border-color: {c['accent']}; background: {c['card2']}; }}
 QPushButton#link {{ background: transparent; border: 0; padding: 0 2px; color: {c['accent']}; font-size: 12px;
-  font-weight: 600; }}
+  font-weight: 500; }}
 QPushButton#link:hover {{ text-decoration: underline; background: transparent; }}
 QListWidget#recent {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 14px; outline: 0;
   padding: 6px; }}
@@ -232,7 +250,7 @@ QPushButton {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-
 QPushButton:hover {{ background: {c['hover']}; }}
 QPushButton:disabled {{ color: {c['strong']}; }}
 QPushButton:default, QPushButton[accent="true"] {{ background: {c['accent']}; color: {c['onaccent']};
-  border-color: {c['accent']}; font-weight: 600; }}
+  border-color: {c['accent']}; font-weight: 500; }}
 QPushButton:default:hover, QPushButton[accent="true"]:hover {{ background: {c['accent2']}; }}
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {c['card']};
   border: 1px solid {c['stroke']}; border-radius: 8px; padding: 4px 8px; }}
@@ -255,7 +273,7 @@ QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; bord
   background: {c['card']}; border-radius: 4px; }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QGroupBox {{ border: 1px solid {c['stroke']}; border-radius: 10px; margin-top: 10px; padding-top: 8px; }}
-QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; font-weight: 600; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; font-weight: 500; }}
 QMenu {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 10px; padding: 4px; }}
 QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 6px; }}
 QMenu::item:selected {{ background: {c['sel']}; color: {c['text']}; }}

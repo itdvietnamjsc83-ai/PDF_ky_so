@@ -230,12 +230,26 @@ class DocTab(QWidget):
         outer.setSpacing(0)
         self.banner = DocBanner()
         outer.addWidget(self.banner)
-        lay = QHBoxLayout()
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self.thumbs)
-        lay.addWidget(self.view, 1)
-        outer.addLayout(lay, 1)
+        # 1.0.22: vạch ngăn kéo được giữa cột ảnh thu nhỏ và trang xem – nhớ độ rộng cho lần sau
+        from PySide6.QtWidgets import QSplitter
+        self.split = QSplitter(Qt.Horizontal, objectName="docsplit")
+        self.split.setHandleWidth(5)
+        self.split.setChildrenCollapsible(False)
+        self.split.addWidget(self.thumbs)
+        self.split.addWidget(self.view)
+        self.split.setStretchFactor(0, 0)
+        self.split.setStretchFactor(1, 1)
+        tw = 0
+        if owner is not None and hasattr(owner, "settings"):
+            try:
+                tw = int(owner.settings.value("ui/thumb_w", 0) or 0)
+            except (TypeError, ValueError):
+                tw = 0
+        tw = tw or self.thumbs.sizeHint().width()
+        self.split.setSizes([tw, 1000])
+        if owner is not None and hasattr(owner, "settings"):
+            self.split.splitterMoved.connect(lambda *_: owner.settings.setValue("ui/thumb_w", self.thumbs.width()))
+        outer.addWidget(self.split, 1)
         self.thumbs.pageClicked.connect(self.view.go_to)
         self.view.currentPageChanged.connect(self.thumbs.select_page)
         if owner:
@@ -676,6 +690,17 @@ class MainWindow(QMainWindow):
         # --- tab file ---
         self.tabs = QTabWidget(documentMode=True, movable=True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.tabBar().setElideMode(Qt.ElideMiddle)           # tên dài: giữ đầu + đuôi (…_v2.pdf)
+        self.tabs.tabBar().setExpanding(False)
+        # 1.0.22: tab "Bắt đầu" kiểu Foxit ở đầu hàng tab -> về trang bắt đầu (mở file, gần đây) khi đang mở file
+        self.start_tab = QToolButton(objectName="starttab", text="Bắt đầu", checkable=True,
+                                     toolTip="Trang bắt đầu: mở file, file gần đây, bắt đầu nhanh")
+        self.start_tab.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.start_tab.setIconSize(QSize(14, 14))
+        self.start_tab.setCursor(Qt.PointingHandCursor)
+        self.start_tab.clicked.connect(lambda: self.show_start_page(True))
+        self.tabs.setCornerWidget(self.start_tab, Qt.TopLeftCorner)
+        self.tabs.tabBar().tabBarClicked.connect(lambda _i: self.show_start_page(False))
         self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabs.tabBar().customContextMenuRequested.connect(self._tab_menu)
         self.tabs.currentChanged.connect(self._tab_changed)
@@ -766,6 +791,42 @@ class MainWindow(QMainWindow):
         self.ribbon_btn.setIconSize(QSize(18, 18))
         self.ribbon_btn.clicked.connect(lambda on: self.set_ribbon_visible(not on))
         th.addWidget(self.ribbon_btn)
+        # --- 1.0.22: hàng trên cùng kiểu Foxit: thanh truy cập nhanh + các nhóm thành tab ngang ---
+        self.menubar_row = QFrame(objectName="quickrow")
+        qh = QHBoxLayout(self.menubar_row)
+        qh.setContentsMargins(8, 2, 10, 0)
+        qh.setSpacing(2)
+        self.quick_buttons = []
+        for cmd, ic, tip in (("open", "open", "Mở (Ctrl+O)"), ("save", "save", "Lưu (Ctrl+S)"),
+                             ("print", "print", "In (Ctrl+P)"), (None, None, None),
+                             ("undo", "undo", "Hoàn tác (Ctrl+Z)"), ("redo", "redo", "Làm lại (Ctrl+Y)")):
+            if cmd is None:
+                sep = QFrame(objectName="vsep")
+                sep.setFixedHeight(16)
+                qh.addWidget(sep)
+                continue
+            b = QToolButton(objectName="qa", toolTip=tip)
+            b.setIconSize(QSize(16, 16))
+            b.setFixedSize(26, 26)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, c=cmd: self.run(c))
+            self.quick_buttons.append((b, ic, cmd))
+            qh.addWidget(b)
+        qh.addSpacing(10)
+        self.mode_tabs = []
+        for k, (mode, label, _g) in enumerate(MODES):
+            t = QToolButton(objectName="modetab", text=RAIL_LABEL.get(mode, label).replace("&", "&&"), checkable=True)
+            t.setCursor(Qt.PointingHandCursor)
+            t.setToolTip(label)
+            t.clicked.connect(lambda _=False, k=k: self.mode_group.button(k).click())
+            self.mode_tabs.append(t)
+            qh.addWidget(t)
+        self.mode_tabs[0].setChecked(True)
+        self.mode_group.idToggled.connect(lambda k, on: on and [t.setChecked(i == k)
+                                                                 for i, t in enumerate(self.mode_tabs)])
+        qh.addStretch()
+        v.addWidget(self.menubar_row)
         v.addWidget(top)
 
         # --- dải công cụ (ẩn/hiện được) ---
@@ -884,6 +945,61 @@ class MainWindow(QMainWindow):
         v = self.settings.value(key, default)
         return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
 
+    def show_start_page(self, on: bool):
+        """Tab "Bắt đầu" (kiểu Foxit): xem trang bắt đầu ngay trong vùng tài liệu, hàng tab file vẫn còn;
+        bấm một tab file để quay lại tài liệu."""
+        ov = getattr(self, "start_overlay", None)
+        if on and self.tabs.count():
+            if ov is None:
+                ov = self.start_overlay = StartPage()
+                ov.setParent(self.tabs)
+                ov.command.connect(self.run)
+                ov.openPath.connect(lambda p: self.open_files([p]))
+                ov.removeRecent.connect(self.remove_recent)
+                self.tabs.installEventFilter(self)
+            ov.apply_colors(self.colors)
+            ov.set_recent(self.recent_files(), self.colors)
+            st = getattr(self, "_lic_short", None)
+            if st:
+                ov.set_license(*st)
+            self._place_start_overlay()
+            ov.show()
+            ov.raise_()
+        elif ov is not None:
+            ov.hide()
+        self.start_tab.setChecked(bool(ov is not None and ov.isVisible()) or not self.tabs.count())
+
+    def _place_start_overlay(self):
+        ov = getattr(self, "start_overlay", None)
+        w = self.tabs.currentWidget()
+        if ov is not None and w is not None:
+            from PySide6.QtCore import QPoint, QRect
+            ov.setGeometry(QRect(w.mapTo(self.tabs, QPoint(0, 0)), w.size()))
+
+    def layout_style(self) -> str:
+        return "tabs" if getattr(self, "_layout_style", "rail") == "tabs" else "rail"
+
+    def set_layout_style(self, style: str, save: bool = True):
+        """1.0.22: "rail" = cột nhóm công cụ bên trái; "tabs" = các nhóm thành tab ngang trên cùng (như Foxit).
+        Thanh truy cập nhanh (Mở, Lưu, In, Hoàn tác, Làm lại) có ở cả hai kiểu."""
+        style = "tabs" if style == "tabs" else "rail"
+        self._layout_style = style
+        for t in self.mode_tabs:
+            t.setVisible(style == "tabs")
+        if style == "tabs":
+            self.rail.setVisible(False)
+        else:
+            self.rail.setVisible(self._bool_setting("ui/rail", True))
+        for key, a in getattr(self, "style_actions", {}).items():
+            a.blockSignals(True)
+            a.setChecked(key == style)
+            a.blockSignals(False)
+        a = getattr(self, "panel_actions", {}).get("rail")
+        if a is not None:
+            a.setEnabled(style == "rail")
+        if save:
+            self.settings.setValue("ui/layout_style", style)
+
     def _mode_clicked(self, k: int):
         self.toolbars.setCurrentIndex(k)
         self.lbl_title.setText(MODES[k][1])
@@ -948,6 +1064,13 @@ class MainWindow(QMainWindow):
             a.toggled.connect(lambda on, k=key: self.set_panel_visible(k, on))
             self.panel_actions[key] = a
         m.addSeparator()
+        self.style_actions = {}
+        for key, label in (("rail", "Kiểu nhóm công cụ ở cột trái"), ("tabs", "Kiểu tab ngang trên cùng (như Foxit)")):
+            a = m.addAction(label)
+            a.setCheckable(True)
+            a.toggled.connect(lambda on, k=key: on and self.set_layout_style(k))
+            self.style_actions[key] = a
+        m.addSeparator()
         m.addAction("Chỉ xem văn bản – ẩn tất cả (Ctrl+F2)", lambda: self.set_focus_view(True))
         m.addAction("Hiện lại tất cả", lambda: self.set_focus_view(False))
         m.addSeparator()
@@ -957,6 +1080,7 @@ class MainWindow(QMainWindow):
         for key in ("thumbs", "rail", "side"):
             self.set_panel_visible(key, self._bool_setting(f"ui/{key}", True), save=False)
         self.set_rail_compact(self._bool_setting("ui/rail_compact", False), save=False)
+        self.set_layout_style(str(self.settings.value("ui/layout_style", "tabs")), save=False)   # mặc định kiểu Foxit
 
     def panel_visible(self, key: str) -> bool:
         if key == "ribbon":
@@ -979,7 +1103,7 @@ class MainWindow(QMainWindow):
                 if isinstance(t, DocTab):
                     t.thumbs.setVisible(on)
         elif key == "rail":
-            self.rail.setVisible(on)
+            self.rail.setVisible(on and self.layout_style() == "rail")
             if save:
                 self.settings.setValue("ui/rail", on)
         elif key == "side":
@@ -1011,6 +1135,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, ev):
         from PySide6.QtCore import QEvent
+        if obj is self.tabs and ev.type() == QEvent.Resize:
+            QTimer.singleShot(0, self._place_start_overlay)
         if obj is getattr(self, "search", None) and ev.type() == QEvent.KeyPress:
             if ev.key() in (Qt.Key_Return, Qt.Key_Enter) and ev.modifiers() & Qt.ShiftModifier:
                 self.search_doc(self.search.text(), backward=True)
@@ -1278,6 +1404,8 @@ class MainWindow(QMainWindow):
         self.ribbon_btn.setIcon(icon("chevup" if self.ribbon_visible() else "chevdown", c["text"]))
         self.ribbon_hide_btn.setIcon(icon("chevup", c["muted"] if "muted" in c else c["text"]))
         self.ribbon_handle.setIcon(icon("chevdown", c["text"]))
+        for b, ic, _cmd in self.quick_buttons:
+            b.setIcon(icon(ic, c["text"]))
         self.rail_btn.setIcon(icon("chevright" if self.rail_compact() else "chevleft", c["railtext"]))
         self.layout_btn.setIcon(icon("layout", c["text"]))
         self.empty.apply_colors(c)
@@ -1515,6 +1643,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabButton(idx, self.tabs.tabBar().ButtonPosition.RightSide, close)
         self.tabs.setCurrentIndex(idx)
         self.stack.setCurrentIndex(1)
+        self.show_start_page(False)
         QTimer.singleShot(0, tab.view, tab.view.fit_page)
         return tab
 
@@ -4912,6 +5041,9 @@ class MainWindow(QMainWindow):
         self.lic_chip.style().polish(self.lic_chip)
         self.lic_chip.setVisible(True)
         self.empty.set_license(st.short, state)
+        self._lic_short = (st.short, state)
+        if getattr(self, "start_overlay", None) is not None:
+            self.start_overlay.set_license(st.short, state)
         self.apply_edition_ui()
 
     def _update_state(self):
