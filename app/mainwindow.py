@@ -3432,39 +3432,101 @@ class MainWindow(QMainWindow):
             v = o.sp_size.value()
             return v if v and abs(v - run.size) > 0.05 else None
 
+        def style_chosen():
+            return bool(o.cb_family.currentData() or (o.btn_bold.isChecked() and not run.bold)
+                        or (o.btn_italic.isChecked() and not run.italic))
+
+        def assess(text):
+            """1.0.22 – nguyên tắc: giữ nguyên phông, cỡ, độ rộng chữ. Trả về (phông, nguồn, kết quả giữ nguyên,
+            kết quả co cho vừa | None, [(nhãn ngắn, chi tiết)] các thay đổi hình thức cần cảnh báo)."""
+            if style_chosen():
+                fp = editing.styled_font(run, o.cb_family.currentData() or None,
+                                         o.btn_bold.isChecked() or run.bold, o.btn_italic.isChecked() or run.italic)
+                src = "chosen"
+            else:
+                fp, src = editing.original_font(run, text, doc, page)
+            warns = []
+            if src == "family":
+                need = "".join(sorted(set(text.replace("\n", "")) - {" "}))
+                miss = fonts.missing_chars(fp0, need) if src0 != "family" else ""
+                why = (f"thiếu ký tự “{miss}” vừa gõ" if miss else "không nhúng trong file và máy chưa cài")
+                warns.append(("Đổi phông", f"Phông gốc “{run.font_name}” {why}. Chữ sửa sẽ phải dùng phông thay "
+                                           f"thế “{os.path.basename(fp)}” – hình thức chữ khác bản gốc."))
+            size = chosen_size()
+            strict = editing.replace_group(doc, page, lines, text, fp, size, None, fit=True, dry=True,
+                                           runs_all=runs, allow_shrink=False, allow_condense=False)
+            fit = None
+            if strict["overflow"] and o.chk_fit.isChecked():
+                fit = editing.replace_group(doc, page, lines, text, fp, size, None, fit=True, dry=True, runs_all=runs)
+                parts = []
+                if fit["shrunk"]:
+                    parts.append(f"thu nhỏ cỡ chữ {strict['size']:g} → {fit['size']:g} pt")
+                if fit["condensed"]:
+                    parts.append(f"co hẹp chữ còn {fit['hscale'] * 100:.0f}%")
+                if parts:
+                    warns.append(("Phải thu nhỏ chữ", "Chữ dài hơn chỗ trống trên trang. Muốn vừa phải "
+                                  + " và ".join(parts) + ". Nếu giữ nguyên cỡ thì chữ sẽ tràn / đè lên chữ bên cạnh."))
+                else:
+                    fit = None
+            if strict["overflow"] and fit is None:
+                warns.append(("Tràn chỗ", "Chữ dài hơn chỗ trống trên trang – sẽ tràn / đè lên chữ bên cạnh. "
+                                          "Nên rút gọn lại."))
+            return fp, src, strict, fit, warns
+
+        def live_check():
+            bar = getattr(tab.view, "_inline_bar", None)
+            inl = getattr(tab.view, "_inline", None)
+            if bar is None or inl is None or getattr(bar, "mode", "") != "edit":
+                return
+            try:
+                *_r, warns = assess(inl[0].toPlainText())
+            except Exception as e:
+                warns = [("Lỗi phông", str(e))]
+            bar.set_warning(" · ".join(w[0] for w in warns) or None, "\n\n".join(w[1] for w in warns))
+            tab.view._place_inline_bar()
+
         def done(text):
             restyled = bool(o.cb_family.currentData() or o.btn_bold.isChecked() or o.btn_italic.isChecked()
                             or chosen_size() or getattr(o, "_edit_color", None) != col0)
             if text is None or (text.replace("\n", " ").strip() == old.strip() and not restyled):
                 tab.view.canvas.update()
                 return
-            fam = o.cb_family.currentData() or None
-            bold = o.btn_bold.isChecked() or None
-            italic = o.btn_italic.isChecked() or None
-            if fam or (bold and not run.bold) or (italic and not run.italic):
-                fp = editing.styled_font(run, fam, bold or run.bold, italic or run.italic)
-            else:                                   # không đổi kiểu chữ: dùng đúng phông gốc nếu đủ ký tự
-                fp, src = editing.original_font(run, text, doc, page)
-                if src == "family" and src0 != "family":
-                    self._flash_later = ("Phông gốc trong file thiếu ký tự vừa gõ – đã dùng phông gần giống nhất "
-                                         "trên máy.")
+            try:
+                fp, src, strict, fit, warns = assess(text)
+            except Exception as e:
+                QMessageBox.warning(self, APP_NAME, f"Không sửa được:\n{e}")
+                QTimer.singleShot(0, lambda: open_editor(text))
+                return
+            mode = "keep"
+            if warns:
+                mode = self._ask_edit_warning(warns, strict, fit)
+                if mode == "back":                       # quay lại ô gõ, giữ chữ đang gõ
+                    QTimer.singleShot(0, lambda: open_editor(text))
+                    return
             size = chosen_size()
             col = getattr(o, "_edit_color", None)
             try:
-                info = editing.replace_group(doc, page, lines, text, fp, size, col, fit=o.chk_fit.isChecked())
+                if mode == "fit" and fit is not None:
+                    info = editing.replace_group(doc, page, lines, text, fp, size, col, fit=True, runs_all=runs)
+                else:
+                    info = editing.replace_group(doc, page, lines, text, fp, size, col, fit=True, runs_all=runs,
+                                                 allow_shrink=False, allow_condense=False)
             except Exception as e:
                 QMessageBox.warning(self, APP_NAME, f"Không sửa được:\n{e}")
                 return
-            msg = "Đã sửa chữ."
+            msg = "Đã sửa chữ, giữ nguyên phông và cỡ chữ." if src != "family" and not (
+                info["shrunk"] or info["condensed"]) else "Đã sửa chữ."
+            if info.get("added_lines"):
+                msg += f" Đoạn dài thêm {info['added_lines']} dòng vào chỗ trống bên dưới."
             if info["shrunk"]:
-                msg += f" Dòng quá dài nên đã co chữ hẹp lại và còn cỡ {info['size']:g} pt cho vừa 1 dòng."
+                msg += f" Đã thu nhỏ chữ còn {info['size']:g} pt cho vừa."
             elif info.get("condensed"):
-                msg += " Gần hết chỗ bên phải nên đã co chữ hẹp lại một chút cho vừa 1 dòng (giữ nguyên cỡ chữ)."
+                msg += f" Đã co hẹp chữ còn {info['hscale'] * 100:.0f}% cho vừa (giữ cỡ chữ)."
             if info["overflow"]:
-                msg += " ⚠ Chữ vẫn dài hơn chỗ trống (có thể đè lên chữ bên cạnh) – nên rút gọn lại."
-            extra = getattr(self, "_flash_later", None)
-            self._flash_later = None
-            self._flash(msg + (" " + extra if extra else "") + " Ctrl+Z để hoàn tác.")
+                msg += " ⚠ Chữ dài hơn chỗ trống (có thể đè lên chữ bên cạnh) – nên rút gọn lại."
+            if src == "family":
+                msg += " ⚠ Đã dùng phông thay thế."
+            self._flash(msg + " Ctrl+Z để hoàn tác.")
             tab.refresh()
             self._update_state()
         self._edit_done_cb = done
@@ -3473,11 +3535,46 @@ class MainWindow(QMainWindow):
                            "bold": bool(run.bold), "italic": bool(run.italic)}
         # 1 dòng: ô gõ không tự xuống dòng mà kéo dài sang phải tới chữ kế tiếp / lề phải trang (giữ cỡ chữ)
         room = editing.line_room(doc, page, lines, runs) if len(lines) == 1 else None
-        tab.view.begin_inline_text(page, rect, old, qt_family(fp0), run.size, color, done, caret=(x, y),
-                                   bold=False, italic=False, bar=self._edit_fmtbar(tab, run), grow_right=room)
-        if any((o.cb_family.currentData(), o.btn_bold.isChecked(), o.btn_italic.isChecked(), chosen_size())):
-            self._restyle_inline(tab)
+
+        def open_editor(initial):
+            tab.view.begin_inline_text(page, rect, initial, qt_family(fp0), run.size, color, done,
+                                       caret=(x, y) if initial == old else None, bold=False, italic=False,
+                                       bar=self._edit_fmtbar(tab, run), grow_right=room)
+            inl = getattr(tab.view, "_inline", None)
+            if inl is not None:
+                t = QTimer(inl[0], singleShot=True, interval=250)
+                t.timeout.connect(live_check)
+                inl[0].textChanged.connect(t.start)
+                bar = getattr(tab.view, "_inline_bar", None)
+                if bar is not None:
+                    bar.changed.connect(lambda _st: t.start())
+                live_check()
+            if any((o.cb_family.currentData(), o.btn_bold.isChecked(), o.btn_italic.isChecked(), chosen_size())):
+                self._restyle_inline(tab)
+        open_editor(old)
         return False
+
+    def _ask_edit_warning(self, warns, strict, fit) -> str:
+        """Sửa chữ làm thay đổi hình thức (phông / cỡ / độ rộng) -> hỏi: "fit" co cho vừa | "keep" giữ nguyên cỡ
+        (hoặc dùng phông thay thế) | "back" quay lại sửa."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Cảnh báo: chữ sửa sẽ khác hình thức bản gốc")
+        box.setText("<b>Nguyên tắc sửa chữ: giữ nguyên phông và cỡ chữ của văn bản.</b><br>"
+                    "Lần sửa này sẽ làm thay đổi:")
+        box.setInformativeText("\n\n".join("• " + w[1] for w in warns))
+        b_back = box.addButton("Quay lại sửa", QMessageBox.RejectRole)
+        b_fit = box.addButton(f"Thu nhỏ cho vừa ({fit['size']:g} pt)", QMessageBox.AcceptRole) if fit else None
+        b_keep = box.addButton("Giữ nguyên cỡ chữ" if strict.get("overflow") else "Vẫn sửa (dùng phông thay thế)",
+                               QMessageBox.AcceptRole)
+        box.setDefaultButton(b_back)
+        box.exec()
+        c = box.clickedButton()
+        if c is b_fit:
+            return "fit"
+        if c is b_keep:
+            return "keep"
+        return "back"
 
     def _scan_edit(self, tab, page, rect) -> bool:
         """11e – trang scan: phủ màu nền giấy vùng chọn rồi gõ chữ mới cùng cỡ, đúng chỗ (thành hộp chữ sửa được)."""

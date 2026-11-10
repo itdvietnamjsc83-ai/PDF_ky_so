@@ -813,13 +813,37 @@ def group_text(lines) -> str:
     return " ".join(" ".join(r.text.strip() for r in ln) for ln in lines)
 
 
+def para_room(doc, i: int, lines, runs=None) -> float:
+    """1.0.22: mép dưới (pt) mà đoạn văn được phép kéo dài thêm dòng: tới chữ gần nhất bên dưới (cùng cột)
+    hoặc lề dưới trang."""
+    group = [r for ln in lines for r in ln]
+    ids = {r.index for r in group}
+    if runs is None:
+        runs = text_runs(doc, i)
+    x0 = min(r.rect[0] for r in group)
+    x1 = max(r.rect[2] for r in group)
+    bottom = max(r.rect[3] for r in group)
+    _pw, ph = doc.page_size_pt(i)
+    limit = ph - 36.0
+    for r in runs:
+        if r.index in ids or r.rect[1] < bottom - 0.5:
+            continue
+        if min(x1, r.rect[2]) - max(x0, r.rect[0]) > 0:
+            limit = min(limit, r.rect[1])
+    return max(limit, bottom)
+
+
 def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = None, size: float | None = None,
-                  color=None, fit: bool = True, snapshot: bool = True) -> dict:
+                  color=None, fit: bool = True, snapshot: bool = True, dry: bool = False, runs_all=None,
+                  allow_shrink: bool = True, allow_condense: bool = True) -> dict:
     """Thay cả dòng / cả đoạn (lines: [[TextRun]]) bằng chữ mới – giữ lề trái, đường chân chữ, cách dòng.
     1.0.22 – gõ thêm chữ GIỮ NGUYÊN cỡ chữ: một dòng thì kéo dài sang phải tới chữ kế tiếp / lề phải trang.
     fit: hết chỗ thì co ngang chữ (tối đa còn 80%, giữ chiều cao) cho vừa 1 dòng; vẫn không vừa mới thu nhỏ cỡ.
     size: người dùng chọn cỡ chữ -> luôn giữ đúng cỡ đó (không tự thu nhỏ lại), chỉ co ngang khi hết chỗ.
-    Trả về {"size", "hscale", "extended", "condensed", "shrunk", "overflow"}."""
+    Đoạn văn dài thêm: còn chỗ trống bên dưới thì thêm dòng (giữ cỡ chữ) trước khi co / thu nhỏ.
+    dry: chỉ tính (không sửa file) – để cảnh báo trước. allow_shrink=False: không thu nhỏ cỡ chữ (chấp nhận tràn).
+    allow_condense=False: không co hẹp chữ. Cả hai False = giữ nguyên hình thức (chỉ kéo dài / thêm dòng).
+    Trả về {"size", "hscale", "extended", "condensed", "shrunk", "overflow", "added_lines"}."""
     runs = [r for ln in lines for r in ln]
     first = lines[0][0]
     (x0, base0), upright = run_origin(doc, i, first)
@@ -838,7 +862,10 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
     else:
         pitch = size0 * 1.2
     text = new_text.replace("\n", " ") if len(lines) > 1 else new_text.replace("\n", " ")
-    info = {"size": size0, "hscale": 1.0, "extended": False, "condensed": False, "shrunk": False, "overflow": False}
+    info = {"size": size0, "hscale": 1.0, "extended": False, "condensed": False, "shrunk": False, "overflow": False,
+            "added_lines": 0, "orig_size": float(first.size)}
+    if not allow_shrink:
+        keep = True
     if text.strip():
         miss = fonts.missing_chars(fp, text)
         if miss:
@@ -848,9 +875,18 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
     if len(lines) == 1:
         w = fonts.measure(fp, text, sz) if text.strip() else 0
         if w > width * 1.02:
-            room = max(width, line_room(doc, i, lines) - x0)
+            room = max(width, line_room(doc, i, lines, runs_all) - x0)
+            wrapped = fonts.wrap(fp, text, sz, room)
+            free = para_room(doc, i, lines, runs_all) - (base0 + size0 * 0.25)
+            extra = max(0, int(free // max(1.0, pitch)))
             if w <= room:                                   # còn chỗ bên phải: giữ nguyên cỡ, kéo dài dòng
                 info["extended"] = True
+            elif len(wrapped) > 1 and len(wrapped) - 1 <= extra:   # chỗ trống bên dưới: xuống dòng, giữ cỡ
+                info["extended"] = True
+                info["added_lines"] = len(wrapped) - 1
+                width = room
+            elif fit and not allow_condense:
+                info["overflow"] = True
             elif fit:
                 hs = room / w
                 if hs >= MIN_HSCALE:                        # co ngang cho vừa 1 dòng, chiều cao giữ nguyên
@@ -866,22 +902,33 @@ def replace_group(doc, i: int, lines, new_text: str, font_path: str | None = Non
                     info["overflow"] = fonts.measure(fp, text, sz) * hs > room * 1.02
             else:
                 info["overflow"] = True
-        out_lines = [text]
+        out_lines = fonts.wrap(fp, text, sz, width) if info["added_lines"] else [text]
     else:
         out_lines = fonts.wrap(fp, text, sz, width)
-        while fit and len(out_lines) > len(lines) and hs > MIN_HSCALE + 1e-6:   # co ngang trước, giữ cỡ chữ
+        n_ok = len(lines)
+        if len(out_lines) > n_ok:                       # còn chỗ trống bên dưới: thêm dòng, giữ cỡ chữ
+            last_base = base0 + (len(lines) - 1) * pitch
+            free = para_room(doc, i, lines, runs_all) - (last_base + size0 * 0.25)
+            extra = max(0, int(free // max(1.0, pitch)))
+            n_ok = len(lines) + min(extra, len(out_lines) - len(lines))
+            info["added_lines"] = n_ok - len(lines)
+        while fit and allow_condense and len(out_lines) > n_ok and hs > MIN_HSCALE + 1e-6:   # co ngang trước, giữ cỡ chữ
             hs = max(MIN_HSCALE, hs - 0.05)
             out_lines = fonts.wrap(fp, text, sz, width / hs)
             info["condensed"] = True
-        while fit and not keep and len(out_lines) > len(lines) and sz > size0 * 0.6:
+        while fit and allow_condense and not keep and len(out_lines) > n_ok and sz > size0 * 0.6:
             sz *= 0.95
             out_lines = fonts.wrap(fp, text, sz, width / hs)
             info["shrunk"] = True
-        info["overflow"] = len(out_lines) > len(lines)
+        info["added_lines"] = max(0, min(len(out_lines), n_ok) - len(lines))
+        info["overflow"] = len(out_lines) > n_ok
         if keep and len(out_lines) > len(lines):        # cỡ lớn hơn: thêm dòng, cách dòng theo cỡ mới
             pitch = max(pitch, sz * 1.2)
     info["hscale"] = round(hs, 3)
     info["size"] = round(sz, 2)
+    info["lines"] = len(out_lines)
+    if dry:
+        return info
     if snapshot:
         doc._snapshot()
     page = doc.page(i)

@@ -160,6 +160,8 @@ def _no_save_mode_prompt(monkeypatch):
     except Exception:
         return
     monkeypatch.setattr(_mw.MainWindow, "_ask_save_mode", lambda self, tab: "overwrite")
+    # sửa chữ làm đổi hình thức -> cảnh báo; kiểm thử cũ mặc định chọn "thu nhỏ cho vừa" như trước
+    monkeypatch.setattr(_mw.MainWindow, "_ask_edit_warning", lambda self, warns, strict, fit: "fit" if fit else "keep")
 
 
 @pytest.fixture(autouse=True)

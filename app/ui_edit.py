@@ -345,7 +345,7 @@ class ToolOptions(QFrame):
         for k, lbl in (("run", "Mảnh chữ"), ("line", "Cả dòng"), ("para", "Cả đoạn")):
             self.cb_scope.addItem(lbl, k)
         self.cb_scope.setCurrentIndex(1)
-        self.chk_fit = WrapCheck("Hết chỗ bên phải thì co chữ hẹp lại cho vừa 1 dòng", checked=True)
+        self.chk_fit = WrapCheck("Hết chỗ: đề nghị co / thu nhỏ chữ cho vừa (luôn hỏi trước, không tự đổi)", checked=True)
         self.chk_fit.setToolTip("Gõ thêm chữ luôn giữ nguyên cỡ chữ: dòng kéo dài sang phải tới chữ bên cạnh / lề "
                                 "phải trang.\nHết chỗ thì co chữ hẹp lại (giữ chiều cao) cho vừa 1 dòng; quá dài "
                                 "mới thu nhỏ cỡ chữ.")
@@ -2134,6 +2134,14 @@ class InlineFormatBar(QFrame):
             b.setIcon(_align_icon(k))
             b.clicked.connect(lambda _=False, k=k: self._emit())
             self.align_btns[k] = b
+        # 1.0.22: cảnh báo đổi hình thức chữ (phông thay thế / phải thu nhỏ, co hẹp chữ) – bấm để xem chi tiết
+        self.btn_warn = QToolButton(text="⚠")
+        self.btn_warn.setObjectName("fmtwarn")
+        self.btn_warn.setStyleSheet("QToolButton#fmtwarn{color:#ffffff;background:#e65100;border-radius:4px;"
+                                    "font-weight:bold;padding:1px 6px}")
+        self.btn_warn.setVisible(False)
+        self.btn_warn.clicked.connect(self._show_warning)
+        self._warn_detail = ""
         self.btn_ok = QToolButton(text="✓", toolTip="Xong (Ctrl+Enter / bấm ra ngoài)")
         self.btn_ok.setStyleSheet("QToolButton{color:#2e7d32;font-weight:bold}")
         self.btn_cancel = QToolButton(text="✕", toolTip="Hủy (Esc)")
@@ -2147,6 +2155,7 @@ class InlineFormatBar(QFrame):
             for b in self.align_btns.values():
                 lay.addWidget(b)
         lay.addSpacing(4)
+        lay.addWidget(self.btn_warn)
         lay.addWidget(self.btn_ok)
         lay.addWidget(self.btn_cancel)
         self._quiet = False
@@ -2158,6 +2167,26 @@ class InlineFormatBar(QFrame):
         for w in self.findChildren(QWidget):
             w.setFocusPolicy(Qt.NoFocus if isinstance(w, QToolButton) else Qt.ClickFocus)
         self._paint_color()
+
+    # ----- cảnh báo
+    def set_warning(self, short: str | None, detail: str = ""):
+        """Hiện nút ⚠ (chữ ngắn, vd. "Đổi phông") khi sửa xong sẽ làm thay đổi hình thức chữ; None: ẩn."""
+        self._warn_detail = detail or (short or "")
+        if short:
+            self.btn_warn.setText("⚠ " + short)
+            self.btn_warn.setToolTip(self._warn_detail)
+        vis = bool(short)
+        if self.btn_warn.isVisible() != vis or vis:
+            self.btn_warn.setVisible(vis)
+            self.adjustSize()
+
+    def warning(self) -> str:
+        return self._warn_detail if self.btn_warn.isVisible() else ""
+
+    def _show_warning(self):
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.showText(self.btn_warn.mapToGlobal(self.btn_warn.rect().bottomLeft()), self._warn_detail,
+                          self.btn_warn)
 
     # ----- trạng thái
     def set_orig_size(self, size: float | None):
