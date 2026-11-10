@@ -1553,7 +1553,24 @@ class MainWindow(QMainWindow):
             if w.isMaximized() or w.isFullScreen():
                 w.showNormal()
             r, c = divmod(k, cols)
-            w.setGeometry(scr.x() + c * cw, scr.y() + r * ch, cw, ch)
+            self._place_framed(w, scr.x() + c * cw, scr.y() + r * ch, cw, ch)
+        # Windows chỉ biết đúng độ dày khung / thanh tiêu đề sau khi cửa sổ hiện ra -> đặt lại lần nữa
+        QTimer.singleShot(200, lambda: [self._place_framed(w, scr.x() + divmod(k, cols)[1] * cw,
+                                                           scr.y() + divmod(k, cols)[0] * ch, cw, ch)
+                                        for k, w in enumerate(wins) if w.isVisible()])
+
+    @staticmethod
+    def _place_framed(w, x, y, cw, ch):
+        """1.0.22: đặt CẢ cửa sổ (gồm thanh tiêu đề có nút thu nhỏ / phóng to / đóng) vào ô (x, y, cw, ch).
+        setGeometry chỉ tính phần ruột -> trước đây thanh tiêu đề bị đẩy lên khỏi mép trên màn hình."""
+        fg, g = w.frameGeometry(), w.geometry()
+        left, top = g.x() - fg.x(), g.y() - fg.y()
+        right, bottom = fg.right() - g.right(), fg.bottom() - g.bottom()
+        if top <= 0 and not w.isFullScreen():              # chưa có khung thật: ước lượng theo kiểu giao diện
+            from PySide6.QtWidgets import QStyle
+            top = QApplication.style().pixelMetric(QStyle.PM_TitleBarHeight) + 8
+            left = right = bottom = 8 if sys.platform == "win32" else 0
+        w.setGeometry(x + left, y + top, max(200, cw - left - right), max(200, ch - top - bottom))
 
     def all_windows(self) -> list:
         main = getattr(self, "primary", None) or self

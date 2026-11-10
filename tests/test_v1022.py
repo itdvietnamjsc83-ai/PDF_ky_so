@@ -76,6 +76,11 @@ def test_detach_tab_to_new_window(win, qapp, samples):
         assert win.tabs.count() == 1 and w2.tabs.count() == 1
         assert w2.current().doc is doc and doc.modified and doc.can_undo
         assert w2.all_windows()[0] is win
+        # xếp cạnh nhau: thanh tiêu đề (nút đóng / thu nhỏ) vẫn nằm trong màn hình, không bị đẩy lên trên
+        scr = win.screen().availableGeometry()
+        for w in (win, w2):
+            assert w.frameGeometry().top() >= scr.top() and w.geometry().top() > scr.top()
+            assert w.geometry().bottom() <= scr.bottom() + 1
     finally:
         doc.modified = False
         w2.close()
