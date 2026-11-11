@@ -163,8 +163,39 @@ def test_stamp_all_pages_and_watermark(win, qapp, tmp_path, monkeypatch):
     def wm(self):
         self.cb_text.setCurrentText("NHÁP")
         self.cb_style.setCurrentIndex(self.cb_style.findData("watermark"))
+        assert self.sl_op.isEnabled() and self.sl_op.value() == 25          # một thanh Độ đậm, chỉnh được
+        self.sl_op.setValue(40)
         self.cb_scope.setCurrentIndex(self.cb_scope.findData("all"))
         return QDialog.Accepted
     monkeypatch.setattr(ui_tools.StampTextDialog, "exec", wm)
     win.run("stamptext")
-    assert tab.view.placement is None and all("NHÁP" in tab.doc.text(i) for i in range(3))
+    assert tab.view.placement is not None                   # chữ chìm cũng nổi trên trang, kéo được
+    tab.view.commit_placement()
+    assert all("NHÁP" in tab.doc.text(i) for i in range(3))
+    its = [i for i in items.find_items(tab.doc, 1) if i.kind == "stamp"]
+    assert its and its[0].spec["shape"] == "none" and its[0].spec["opacity"] == 40 and its[0].spec["angle"] == 315
+    # chọn lại -> bảng phải có nút sửa con dấu, độ đậm chỉnh được
+    it = its[0]
+    win.page_pressed(1, (it.rect[0] + it.rect[2]) / 2, (it.rect[1] + it.rect[3]) / 2)
+    o = win.tool_opts
+    assert o.btn_stamp_edit.isVisibleTo(o) and o.sl_opacity.value() == 40
+    o.sl_opacity.setValue(70)
+    tab.view.commit_placement()
+    it = [i for i in items.find_items(tab.doc, 1) if i.kind == "stamp"][0]
+    assert it.spec["opacity"] == 70
+
+
+def test_no_border_and_page_peek(win, qapp, tmp_path):
+    sp = items.stamp_spec("ĐÃ DUYỆT", "rect", (0, 0, 150, 50), border="none")
+    lay = items.stamp_layout(sp)
+    assert lay["paths"] == [] and lay["lines"]                      # không viền, chỉ chữ
+    circ = items.stamp_spec("ĐÃ DUYỆT", "circle", (0, 0, 120, 120), border="none", arc="CÔNG TY ABC")
+    assert items.stamp_layout(circ)["paths"] == [] and items.stamp_layout(circ)["arc"]
+    tab = _open(win, qapp, tmp_path)
+    peek = win._page_peek(tab, 0)
+    assert peek is not None and not peek[0].isNull()
+    dlg = StampDialog(None, _Settings(), page=peek)
+    dlg.cb_border.setCurrentIndex(dlg.cb_border.findData("none"))
+    dlg._render()
+    assert dlg.spec()["border"] == "none"
+    assert dlg.page_preview.pixmap() is not None and not dlg.page_preview.pixmap().isNull()

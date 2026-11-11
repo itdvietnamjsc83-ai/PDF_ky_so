@@ -649,7 +649,7 @@ STAMP_PRESETS = ["ĐÃ DUYỆT", "SAO Y BẢN CHÍNH", "BẢN SAO", "BẢN CHÍN
                  "MẬT", "KHẨN", "HỎA TỐC", "NHÁP", "HỦY", "LƯU HÀNH NỘI BỘ"]
 STAMP_SHAPES = [("rect", "Chữ nhật"), ("roundrect", "Chữ nhật bo góc"), ("ellipse", "Bầu dục"),
                 ("circle", "Tròn (chữ chạy vòng)"), ("hexagon", "Lục giác"), ("none", "Không khung (chỉ chữ)")]
-STAMP_BORDERS = [("single", "Viền đơn"), ("double", "Viền đôi"), ("thick", "Viền đậm")]
+STAMP_BORDERS = [("single", "Viền đơn"), ("double", "Viền đôi"), ("thick", "Viền đậm"), ("none", "Không viền (chỉ chữ)")]
 STAMP_FONTS = [("sans", "Không chân, đậm"), ("serif", "Có chân, đậm (Times)")]
 
 
@@ -679,7 +679,7 @@ def stamp_layout(spec):
     asc, desc = fonts.metrics(fp)
     lw = _stamp_line_w(spec, w, h)
     out = {"paths": [], "lines": [], "arc": [], "lw": lw}
-    if shape != "none":
+    if shape != "none" and spec.get("border") != "none":
         sh = "ellipse" if shape == "circle" else shape
         out["paths"].append((shape_paths(sh, w - lw, h - lw), lw / 2, lw / 2, lw))
         if spec.get("border", "double") == "double":
@@ -695,7 +695,8 @@ def stamp_layout(spec):
         R = min(w, h) / 2
         cx, cy = w / 2, h / 2
         r_in = R * 0.58
-        out["paths"].append(([_ellipse(cx - r_in, cy - r_in, cx + r_in, cy + r_in)], 0, 0, max(0.5, lw * 0.6)))
+        if spec.get("border") != "none":
+            out["paths"].append(([_ellipse(cx - r_in, cy - r_in, cx + r_in, cy + r_in)], 0, 0, max(0.5, lw * 0.6)))
         top = R - pad - lw * 0.3                          # mép ngoài của chữ (trong viền)
         band = top - r_in - lw * 0.8
         fs = max(2.0, min(R * 0.2, band / (asc + 0.1)))

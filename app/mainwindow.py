@@ -981,6 +981,7 @@ class MainWindow(QMainWindow):
         self.tool_opts.changed.connect(self._tool_opts_changed)
         self.tool_opts.zRequested.connect(self._sel_z)
         self.tool_opts.deleteRequested.connect(self._sel_delete)
+        self.tool_opts.stampEditRequested.connect(self._edit_stamp_selected)
         from .ui_edit import NotesPanel
         self.notes_panel = NotesPanel()
         self.notes_panel.gotoRequested.connect(self._note_goto)
@@ -4893,7 +4894,8 @@ class MainWindow(QMainWindow):
         if not self._writable(tab, "Đóng dấu chữ"):
             return
         sel = tab.thumbs.selected_pages()
-        dlg = StampDialog(self, self.settings, has_selection=len(sel) > 1)
+        dlg = StampDialog(self, self.settings, has_selection=len(sel) > 1,
+                          page=self._page_peek(tab, tab.view.current_page()))
         if dlg.exec() != StampDialog.Accepted:
             return
         v = dlg.values()
@@ -4907,6 +4909,19 @@ class MainWindow(QMainWindow):
             return
         dlg.remember()
         self.place_stamp(tab, v["spec"], v["scope"])
+
+    @staticmethod
+    def _page_peek(tab, i: int, center=None):
+        """Ảnh trang nhỏ để xem nhanh con dấu trên trang trong hộp thoại."""
+        try:
+            from .ui_edit import pil_to_qimage
+            pw, ph = tab.doc.page_size_pt(i)
+            bm = tab.doc.render(i, min(260 / ph, 260 / pw) * 2)
+            img = pil_to_qimage(bm.to_pil().convert("RGBA"))
+            bm.close()
+            return img, (pw, ph), center
+        except Exception:
+            return None
 
     def place_stamp(self, tab, spec: dict, scope: str = "current", page: int | None = None, center=None):
         """Khung con dấu nổi trên trang: kéo / bấm sang trang khác / kéo góc / xoay, Enter hoặc nháy đúp để đóng."""
@@ -4960,7 +4975,9 @@ class MainWindow(QMainWindow):
         pl = tab.view.placement
         r = pl.rect
         cur = self._spec_from_frame(ctx, (r.left(), r.top(), r.right(), r.bottom()), pl.angle)
-        dlg = StampDialog(self, self.settings, spec=cur)
+        x0, y0, x1, y1 = items.spec_rect(cur)
+        dlg = StampDialog(self, self.settings, spec=cur,
+                          page=self._page_peek(tab, ctx["page"], ((x0 + x1) / 2, (y0 + y1) / 2)))
         if dlg.exec() != StampDialog.Accepted or tab.view.placement is not pl:
             return
         x0, y0, x1, y1 = items.spec_rect(cur)

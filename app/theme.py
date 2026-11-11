@@ -115,7 +115,7 @@ QLabel#raillogo {{ background: transparent; }}
 QToolButton#pivot {{ border: 0; border-radius: 7px; padding: 4px 0 3px 0; margin: 0 2px;
   color: {c['railtext']}; background: transparent; font-size: 10px; font-weight: 400; }}
 QToolButton#pivot:hover {{ background: {c['railsel']}; color: #FFFFFF; }}
-QToolButton#pivot:checked {{ background: {c['railsel']}; color: #FFFFFF; font-weight: 500;
+QToolButton#pivot:checked {{ background: {c['railsel']}; color: #FFFFFF;
   border-left: 2px solid {c['railmark']}; }}
 QToolButton#railbtn {{ border: 0; border-radius: 9px; padding: 6px; margin: 0 5px; background: transparent; }}
 QToolButton#railbtn:hover {{ background: {c['railsel']}; }}
@@ -138,7 +138,7 @@ QToolButton#tabclose:hover {{ background: {c['hover']}; }}
 QTabBar::tab {{ background: {c['hover']}; padding: 2px 6px 2px 10px; margin: 2px 0 0 1px; border: 1px solid {c['stroke']};
   border-bottom: 0; border-top-left-radius: 7px; border-top-right-radius: 7px; min-width: 140px; max-width: 230px;
   color: {c['text2']}; font-size: 12px; font-weight: 300; }}
-QTabBar::tab:selected {{ background: {c['card']}; color: {c['text']}; font-weight: 400; margin-top: 1px;
+QTabBar::tab:selected {{ background: {c['card']}; color: {c['text']}; margin-top: 1px;
   border-top: 2px solid {c['accent']}; }}
 QTabBar QToolButton {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 4px; margin: 2px 0; }}
 QToolButton#tablist {{ border: 1px solid {c['stroke']}; border-radius: 5px; padding: 0 2px; margin: 2px 4px 0 2px;
@@ -151,7 +151,7 @@ QToolButton#starttab {{ background: {c['hover']}; border: 1px solid {c['stroke']
   border-top-left-radius: 7px; border-top-right-radius: 7px; padding: 2px 10px; margin: 2px 0 0 6px;
   color: {c['text2']}; font-size: 12px; font-weight: 300; }}
 QToolButton#starttab:hover {{ background: {c['card']}; color: {c['text']}; }}
-QToolButton#starttab:checked {{ background: {c['card']}; color: {c['text']}; font-weight: 500;
+QToolButton#starttab:checked {{ background: {c['card']}; color: {c['text']};
   border-top: 2px solid {c['accent']}; }}
 
 /* ---- dải cảnh báo trên tài liệu ---- */
@@ -254,11 +254,14 @@ QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -6px 0; border-
   background: {c['card']}; border: 2px solid {c['accent']}; }}
 
 /* ---- điều khiển chung ---- */
-QPushButton {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 8px; padding: 6px 14px; }}
+/* chữ đậm hơn ở trạng thái mặc định / đang chọn làm chữ dài ra mà khung nút không nở theo -> bị cắt chữ;
+   nên mọi trạng thái giữ CÙNG độ đậm, chỉ đổi màu nền / viền */
+QPushButton {{ background: {c['card']}; border: 1px solid {c['stroke']}; border-radius: 8px; padding: 6px 14px;
+  font-weight: 400; }}
 QPushButton:hover {{ background: {c['hover']}; }}
 QPushButton:disabled {{ color: {c['strong']}; }}
 QPushButton:default, QPushButton[accent="true"] {{ background: {c['accent']}; color: {c['onaccent']};
-  border-color: {c['accent']}; font-weight: 500; }}
+  border-color: {c['accent']}; }}
 QPushButton:default:hover, QPushButton[accent="true"]:hover {{ background: {c['accent2']}; }}
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {c['card']};
   border: 1px solid {c['stroke']}; border-radius: 8px; padding: 4px 8px; }}

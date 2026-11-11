@@ -204,6 +204,7 @@ class ToolOptions(QFrame):
     closeRequested = Signal()
     zRequested = Signal(str)           # "front" | "back"
     deleteRequested = Signal()
+    stampEditRequested = Signal()      # 1.0.22: sửa nội dung / hình dạng con dấu đang chọn
     styleApplied = Signal(dict)        # 14e: bấm một kiểu hình đã lưu
 
     ALL_ROWS = ("colors", "width", "size", "opacity", "dash", "heads", "fill", "shadow", "radius", "pen",
@@ -424,6 +425,10 @@ class ToolOptions(QFrame):
         self.btn_delete = QPushButton("Xóa nội dung này")
         self.btn_delete.clicked.connect(self.deleteRequested.emit)
         row("delete", self.btn_delete, "stretch")
+        self.btn_stamp_edit = QPushButton("Sửa chữ, hình dạng, cỡ…", toolTip="Mở lại hộp thoại con dấu (hoặc nháy đúp)")
+        self.btn_stamp_edit.setProperty("accent", True)
+        self.btn_stamp_edit.clicked.connect(self.stampEditRequested.emit)
+        row("stampedit", self.btn_stamp_edit, "stretch")
 
         self._color = PEN_COLORS[0][1]
         self._fill = "#90caf9"
@@ -761,7 +766,7 @@ class ToolOptions(QFrame):
                 self.cb_font.setCurrentIndex(k)
             self.cb_align.setCurrentIndex(max(0, self.cb_align.findData(spec.get("align", "left"))))
         elif kind == "stamp":
-            rows |= {"colors"}
+            rows |= {"colors", "stampedit"}
             self.set_color(spec.get("color", "#d32f2f"))
         elif kind == "ink":
             rows |= {"colors", "width", "pen", "smooth"}

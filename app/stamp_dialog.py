@@ -35,8 +35,11 @@ def default_size_mm(shape: str, lines: int = 1, sub: bool = False) -> tuple[int,
 class StampDialog(QDialog):
     """Tạo mới (spec=None: có thêm Kiểu watermark và Đóng lên trang nào) hoặc sửa dấu đã đóng (spec)."""
 
-    def __init__(self, parent, settings=None, spec: dict | None = None, has_selection: bool = False):
+    def __init__(self, parent, settings=None, spec: dict | None = None, has_selection: bool = False,
+                 page=None):
+        """page = (ảnh trang QImage, (rộng, cao) pt, (x, y) tâm dấu pt | None): xem nhanh dấu trên trang."""
         super().__init__(parent)
+        self.page = page
         self.settings = settings
         self.editing = spec is not None
         self.setWindowTitle("Sửa con dấu" if self.editing else "Con dấu chữ")
@@ -62,7 +65,7 @@ class StampDialog(QDialog):
         if not self.editing:
             self.cb_style = QComboBox()
             self.cb_style.addItem("Con dấu – đặt tự do trên trang, sửa lại được", "stamp")
-            self.cb_style.addItem("Chữ lớn chéo trang, mờ (watermark)", "watermark")
+            self.cb_style.addItem("Chữ chìm chéo trang, mờ (watermark) – cũng sửa lại được", "watermark")
             f.addRow("Kiểu:", self.cb_style)
 
         self.cb_text = QComboBox(editable=True)
@@ -133,9 +136,6 @@ class StampDialog(QDialog):
                 self.cb_scope.addItem("Các trang đang chọn (cùng vị trí)", "selected")
             self.cb_scope.addItem("Tất cả các trang (cùng vị trí)", "all")
             f.addRow("Đóng lên:", self.cb_scope)
-            self.sl_wm = SliderSpin(10, 60, 25)
-            self.lbl_wm = QLabel("Độ đậm chữ chìm:")
-            f.addRow(self.lbl_wm, self.sl_wm)
         left.addLayout(f)
         hint = ("Bấm OK: dấu hiện nổi trên trang – kéo đến chỗ bất kỳ, bấm sang trang khác để chuyển, kéo góc "
                 "đổi cỡ, núm tròn để xoay. Đã đóng rồi vẫn bấm vào để sửa, nháy đúp để mở lại hộp này.")
@@ -151,9 +151,17 @@ class StampDialog(QDialog):
         right = QVBoxLayout()
         right.addWidget(QLabel("<b>Xem trước</b>"))
         self.preview = QLabel(alignment=Qt.AlignCenter)
-        self.preview.setFixedSize(300, 300)
+        self.preview.setFixedSize(260, 220)
         self.preview.setStyleSheet("QLabel{background:#ffffff;border:1px solid #c8c8c8;border-radius:6px}")
         right.addWidget(self.preview)
+        self.page_preview = QLabel(alignment=Qt.AlignCenter)        # 1.0.22: xem nhanh dấu trên trang
+        self.page_preview.setFixedSize(260, 260)
+        self.page_preview.setStyleSheet("QLabel{background:#e9e9e9;border:1px solid #c8c8c8;border-radius:6px}")
+        self.lbl_page = QLabel("<b>Trên trang</b> (đúng tỉ lệ)")
+        right.addWidget(self.lbl_page)
+        right.addWidget(self.page_preview)
+        self.lbl_page.setVisible(page is not None)
+        self.page_preview.setVisible(page is not None)
         right.addStretch()
         root.addLayout(right)
 
@@ -176,7 +184,6 @@ class StampDialog(QDialog):
         self.cb_recent.currentIndexChanged.connect(self._use_recent)
         if not self.editing:
             self.cb_style.currentIndexChanged.connect(self._style_changed)
-            self._style_changed()
         self._shape_changed()
 
     # ---------- giá trị ----------
@@ -195,7 +202,7 @@ class StampDialog(QDialog):
             self.set_color(c.name())
 
     def style(self) -> str:
-        return "stamp" if self.editing else self.cb_style.currentData()
+        return "stamp"                                 # 1.0.22: chữ chìm cũng là con dấu sửa lại được
 
     def spec(self, rect=None) -> dict:
         w, hh = self.sl_w.value() * MM, self.sl_h.value() * MM
@@ -210,7 +217,7 @@ class StampDialog(QDialog):
     def values(self) -> dict:
         """Cho kiểu watermark (giữ như trước) + phạm vi."""
         return {"text": self._text().replace("\n", " "), "style": self.style(), "color": self._color,
-                "opacity": (self.sl_wm.value() if not self.editing else 25) / 100,
+                "opacity": self.sl_op.value() / 100,
                 "scope": "current" if self.editing else self.cb_scope.currentData(), "spec": self.spec()}
 
     def load(self, sp: dict):
@@ -267,15 +274,27 @@ class StampDialog(QDialog):
         self._changed()
 
     def _style_changed(self, *_):
+        """Chữ chìm chéo trang = con dấu không khung, chữ lớn, mờ, xoay chéo (mọi ô vẫn chỉnh được)."""
         wm = self.cb_style.currentData() == "watermark"
-        for w in (self.ed_sub, self.btn_today, self.cb_shape, self.ed_arc, self.cb_border, self.cb_family,
-                  self.sl_op, self.sl_w, self.sl_h, self.sl_angle):
-            w.setEnabled(not wm)
-        self.sl_wm.setEnabled(wm)
-        self.lbl_wm.setEnabled(wm)
-        if not wm:
-            self._shape_changed()
-        self._changed()
+        self._auto_h = False
+        for w in (self.cb_shape, self.cb_border, self.sl_op, self.sl_w, self.sl_h, self.sl_angle, self.ed_sub):
+            w.blockSignals(True)
+        try:
+            if wm:
+                self.cb_shape.setCurrentIndex(self.cb_shape.findData("none"))
+                self.sl_op.setValue(25)
+                self.sl_w.setValue(170)
+                self.sl_h.setValue(40)
+                self.sl_angle.setValue(-45)
+            else:
+                self.cb_shape.setCurrentIndex(self.cb_shape.findData("rect"))
+                self.sl_op.setValue(100)
+                self.sl_angle.setValue(0)
+                self._auto_h = True
+        finally:
+            for w in (self.cb_shape, self.cb_border, self.sl_op, self.sl_w, self.sl_h, self.sl_angle, self.ed_sub):
+                w.blockSignals(False)
+        self._shape_changed()
 
     def _use_recent(self, k):
         sp = self.cb_recent.itemData(k)
@@ -287,10 +306,6 @@ class StampDialog(QDialog):
 
     def _render(self):
         from .ui_edit import pil_to_qimage
-        if not self.editing and self.cb_style.currentData() == "watermark":
-            self.preview.setText(f"<span style='color:{self._color};font-size:22px'>{self._text()}</span><br>"
-                                 "(chữ lớn chéo giữa trang)")
-            return
         sp = self.spec()
         if not sp["text"] and not sp["sub"] and not sp["arc"]:
             self.preview.clear()
@@ -307,7 +322,32 @@ class StampDialog(QDialog):
         if sp.get("angle"):
             from PySide6.QtGui import QTransform
             pm = pm.transformed(QTransform().rotate(float(sp["angle"])), Qt.SmoothTransformation)
-        self.preview.setPixmap(pm.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.preview.setPixmap(pm.scaled(244, 204, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self._render_page(q, sp, _m)
+
+    def _render_page(self, stamp_img, sp, m):
+        """Ảnh trang thu nhỏ + con dấu đúng cỡ, đúng góc, đặt ở tâm dấu (hoặc giữa trang)."""
+        if not self.page:
+            return
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPainter
+        img, (pw, ph), center = self.page
+        W, H = 256, 256
+        k = min(W / pw, H / ph)                                 # pixel / pt
+        canvas = QPixmap(int(pw * k), int(ph * k))
+        canvas.fill(Qt.white)
+        p = QPainter(canvas)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawImage(canvas.rect(), img)
+        x0, y0, x1, y1 = items.spec_rect(sp)
+        sw, sh = (x1 - x0 + 2 * m) * k, (y1 - y0 + 2 * m) * k
+        cx, cy = center or (pw / 2, ph / 2)
+        p.translate(QPointF(cx * k, cy * k))
+        p.rotate(float(sp.get("angle", 0) or 0))
+        from PySide6.QtCore import QRectF
+        p.drawImage(QRectF(-sw / 2, -sh / 2, sw, sh), stamp_img)
+        p.end()
+        self.page_preview.setPixmap(canvas)
 
     # ---------- mẫu đã dùng ----------
     def _recent(self) -> list[str]:
