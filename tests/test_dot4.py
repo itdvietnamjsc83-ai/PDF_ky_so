@@ -41,10 +41,12 @@ def test_line_replace_keeps_size_when_room_right():
     """1.0.22: gõ thêm chữ – còn chỗ bên phải trang thì giữ nguyên cỡ chữ, dòng kéo dài sang phải."""
     d = PdfDocument(data=_contract(1))
     runs = editing.text_runs(d, 0)
-    info = editing.replace_group(d, 0, [editing.line_of(runs, runs[1])], "Dòng mới dài hơn hẳn dòng cũ một chút")
+    line = editing.line_of(runs, runs[1])
+    old_right = max(r.rect[2] for r in line)
+    info = editing.replace_group(d, 0, [line], "Dòng mới dài hơn hẳn dòng cũ một chút, thêm vài chữ nữa")
     assert info["extended"] and not info["shrunk"] and not info["condensed"] and info["size"] == 11
     new = next(r for r in editing.text_runs(d, 0) if r.text.startswith("Dòng mới"))
-    assert abs(new.size - 11) < 0.2 and new.rect[2] > 274          # dài hơn chỗ cũ, cùng cỡ
+    assert abs(new.size - 11) < 0.2 and new.rect[2] > old_right + 10   # dài hơn chỗ cũ, cùng cỡ (mọi phông)
 
 
 def test_line_replace_condenses_to_fit_one_line():
@@ -54,8 +56,16 @@ def test_line_replace_condenses_to_fit_one_line():
     line = [editing.line_of(runs, runs[1])]
     room = editing.line_room(d, 0, line, runs)
     assert 500 < room < 530                                         # lề phải trang ~ lề trái
-    text = "Điều khoản thỏa thuận giữa hai bên được bổ sung thêm nội dung chi tiết cho đủ ý kiến"
-    info = editing.replace_group(d, 0, line, text)
+    # chữ dài hơn chỗ trống khoảng 10% (tính theo đúng phông đang dùng – Times trên Windows / Mac, khác trên Linux)
+    from app import fonts
+    fp, _src = editing.original_font(runs[1], "Điều khoản", d, 0)
+    words = "Điều khoản thỏa thuận giữa hai bên được bổ sung thêm nội dung chi tiết cho đủ ý kiến các bên".split()
+    text = "Điều khoản thỏa thuận giữa hai bên được"
+    k = 0
+    while fonts.measure(fp, text, 11) < (room - 72) * 1.08:
+        text += " " + words[k % len(words)]
+        k += 1
+    info = editing.replace_group(d, 0, line, text, fp)
     assert info["condensed"] and not info["shrunk"] and info["size"] == 11 and 0.8 <= info["hscale"] < 1
     new = next(r for r in editing.text_runs(d, 0) if r.text.startswith("Điều khoản thỏa thuận giữa hai bên được"))
     assert new.rect[2] <= room + 2 and new.rect[3] - new.rect[1] > 8   # vừa 1 dòng, chữ không thấp đi
