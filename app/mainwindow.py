@@ -874,24 +874,28 @@ class MainWindow(QMainWindow):
         self.lic_chip.setVisible(False)
         self.lic_chip.mousePressEvent = lambda e: self.run("license")
         th.addWidget(self.lic_chip)
-        self.search = QLineEdit(placeholderText="Tìm trong tài liệu (Ctrl+F)", objectName="search")
-        self.search.setMinimumWidth(140)
-        self.search.setMaximumWidth(280)
-        self.search.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.search.setToolTip("Gõ chữ cần tìm rồi nhấn Enter; nhấn Enter tiếp để tới trang có chữ đó tiếp theo")
+        self.search = QLineEdit(placeholderText="Tìm trong tài liệu", objectName="search")
+        # cửa sổ hẹp (chia đôi màn hình): ô co lại, gợi ý đổi thành "Tìm…" cho khỏi bị cắt chữ; Ctrl+F trong chú thích
+        self._search_full_w = self.search.fontMetrics().horizontalAdvance("Tìm trong tài liệu") + 44
+        self._search_mid_w = self.search.fontMetrics().horizontalAdvance("Tìm…") + 44
+        self._search_min_w = self.search.fontMetrics().horizontalAdvance("Tìm") + 44
+        self.search.setMinimumWidth(self._search_mid_w)
+        self.search.setMaximumWidth(max(240, self._search_full_w))
+        self.search.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.search.setToolTip("Tìm trong tài liệu (Ctrl+F): gõ chữ cần tìm rồi nhấn Enter; nhấn Enter tiếp để tới "
+                               "trang có chữ đó tiếp theo")
         self.search.returnPressed.connect(lambda: self.search_doc(self.search.text()))
         self.search.textChanged.connect(lambda t: None if t.strip() else self.clear_search())
         self.search.installEventFilter(self)
-        th.addWidget(self.search)
-        self.layout_btn = QToolButton(objectName="flat", toolTip="Bố cục: ẩn/hiện thanh trang, nhóm công cụ, bảng bên "
-                                      "phải (Ctrl+F2: chỉ xem văn bản)")
-        self.layout_btn.setIconSize(QSize(18, 18))
+        # 1.0.22: menu chính "Tùy chỉnh giao diện" (thay nút biểu tượng bố cục ở góc phải)
+        self.layout_btn = QToolButton(objectName="modetab", text="Tùy chỉnh giao diện",
+                                      toolTip="Tùy chỉnh giao diện: ẩn/hiện thanh trang, nhóm công cụ, dải công cụ, "
+                                      "bảng bên phải; kiểu bố cục; cửa sổ riêng (Ctrl+F2: chỉ xem văn bản)")
         self.layout_btn.setPopupMode(QToolButton.InstantPopup)
-        th.addWidget(self.layout_btn)
+        self.layout_btn.setCursor(Qt.PointingHandCursor)
         self.ribbon_btn = QToolButton(objectName="flat", checkable=True)
         self.ribbon_btn.setIconSize(QSize(18, 18))
         self.ribbon_btn.clicked.connect(lambda on: self.set_ribbon_visible(not on))
-        th.addWidget(self.ribbon_btn)
         # --- 1.0.22: hàng trên cùng kiểu Foxit: thanh truy cập nhanh + các nhóm thành tab ngang ---
         self.menubar_row = QFrame(objectName="quickrow")
         qh = QHBoxLayout(self.menubar_row)
@@ -905,6 +909,7 @@ class MainWindow(QMainWindow):
             if cmd is None:
                 sep = QFrame(objectName="vsep")
                 sep.setFixedHeight(16)
+                self._mb_sep = sep
                 qh.addWidget(sep)
                 continue
             b = QToolButton(objectName="qa", toolTip=tip)
@@ -927,7 +932,19 @@ class MainWindow(QMainWindow):
         self.mode_tabs[0].setChecked(True)
         self.mode_group.idToggled.connect(lambda k, on: on and [t.setChecked(i == k)
                                                                  for i, t in enumerate(self.mode_tabs)])
+        qh.addWidget(self.layout_btn)
         qh.addStretch()
+        # 1.0.22: ô tìm kiếm + bố cục + ẩn/hiện dải công cụ lên cùng hàng menu chính -> dải công cụ có trọn hàng
+        # dưới cho các nút chức năng (nhất là khi chia đôi màn hình)
+        qh.addWidget(self.search)
+        # nút ẩn/hiện dải công cụ: đã có nút ^ ngay trên dải (và Ctrl+F1) -> không đặt thêm ở hàng menu
+        self.ribbon_btn.hide()
+        # cửa sổ hẹp: ẩn bớt nút ít dùng (Lưu thành, In, Hoàn tác, Làm lại – vẫn có ở dải công cụ / phím tắt),
+        # tab menu sát lại, ô tìm kiếm thu nhỏ -> hàng menu vừa nửa màn hình mà không cắt chữ
+        self._mb_extra = [b for b, _ic, c in self.quick_buttons if c in ("saveas", "print", "undo", "redo")]
+        self._mb_extra.append(self._mb_sep)
+        self._mb_compact = False
+        self.menubar_row.installEventFilter(self)
         v.addWidget(self.menubar_row)
         v.addWidget(top)
 
@@ -1243,6 +1260,38 @@ class MainWindow(QMainWindow):
     def toggle_focus_view(self):
         self.set_focus_view(any(self.panel_visible(k) for k, _ in self.PANELS))
 
+    def _set_menubar_compact(self, on: bool):
+        self._mb_compact = on
+        for w in self._mb_extra:
+            w.setVisible(not on)
+        self.search.setMinimumWidth(self._search_min_w if on else self._search_mid_w)
+        self.layout_btn.setText("Giao diện" if on else "Tùy chỉnh giao diện")
+        for t in self.mode_tabs + [self.layout_btn]:
+            t.setProperty("compact", on)
+            t.style().unpolish(t)
+            t.style().polish(t)
+        self.menubar_row.layout().invalidate()
+
+    def _fit_menubar(self):
+        """Hàng menu chính co theo bề rộng cửa sổ: đủ chỗ -> đầy đủ; hẹp (chia đôi màn hình) -> gọn."""
+        row = self.menubar_row
+        if getattr(self, "_mb_busy", False):
+            return
+        self._mb_busy = True
+        try:
+            if getattr(self, "_mb_need", None) is None:
+                was = self._mb_compact
+                self._set_menubar_compact(False)
+                self._mb_need = row.layout().minimumSize().width()
+                self._set_menubar_compact(True)
+                row.setMinimumWidth(row.layout().minimumSize().width())
+                self._set_menubar_compact(was)
+            want = row.width() < self._mb_need
+            if want != self._mb_compact:
+                self._set_menubar_compact(want)
+        finally:
+            self._mb_busy = False
+
     def _side_needed(self) -> bool:
         """Có bảng tùy chọn đang dùng (đặt ảnh, công cụ vẽ, ghi chú) -> bảng phải phải hiện dù người dùng đã ẩn."""
         return any(not w.isHidden() for w in (self.tool_opts, self.img_opts, self.notes_panel))
@@ -1251,6 +1300,12 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QEvent
         if obj is self.tabs and ev.type() == QEvent.Resize:
             QTimer.singleShot(0, self._place_start_overlay)
+        if obj is getattr(self, "menubar_row", None) and ev.type() in (QEvent.Resize, QEvent.Polish):
+            self._fit_menubar()
+        if obj is getattr(self, "search", None) and ev.type() == QEvent.Resize:
+            w = self.search.width()
+            self.search.setPlaceholderText("Tìm trong tài liệu" if w >= self._search_full_w
+                                           else "Tìm…" if w >= self._search_mid_w else "Tìm")
         if obj is getattr(self, "search", None) and ev.type() == QEvent.KeyPress:
             if ev.key() in (Qt.Key_Return, Qt.Key_Enter) and ev.modifiers() & Qt.ShiftModifier:
                 self.search_doc(self.search.text(), backward=True)
@@ -1508,6 +1563,9 @@ class MainWindow(QMainWindow):
         if app.styleSheet() != css:            # áp lại stylesheet cho toàn bộ widget rất tốn -> chỉ khi đổi
             app.setPalette(theme.palette(c))
             app.setStyleSheet(css)
+            if hasattr(self, "menubar_row"):          # đổi giao diện / cỡ chữ: đo lại hàng menu
+                self._mb_need = None
+                QTimer.singleShot(0, self._fit_menubar)
         tl = tiles(c)
         for b, ic, cmd, primary in self.tool_buttons:
             b.ensurePolished()                  # bề ngang theo đúng phông của giao diện -> không bị cắt chữ khi hẹp
@@ -1532,7 +1590,6 @@ class MainWindow(QMainWindow):
         for b, ic, _cmd in self.quick_buttons:
             b.setIcon(icon(ic, c["text"]))
         self.rail_btn.setIcon(icon("chevright" if self.rail_compact() else "chevleft", c["railtext"]))
-        self.layout_btn.setIcon(icon("layout", c["text"]))
         self.empty.apply_colors(c)
         self.refresh_recent()
         bar = self.tabs.tabBar()
@@ -5543,7 +5600,8 @@ class MainWindow(QMainWindow):
         self.lic_chip.setProperty("state", state)
         self.lic_chip.style().unpolish(self.lic_chip)
         self.lic_chip.style().polish(self.lic_chip)
-        self.lic_chip.setVisible(True)
+        # đã kích hoạt: không cần hiện ở thanh trên (xem ở Trợ giúp / Bản quyền); dùng thử / chưa kích hoạt mới nhắc
+        self.lic_chip.setVisible(state != "ok")
         self.empty.set_license(st.short, state)
         self._lic_short = (st.short, state)
         if getattr(self, "start_overlay", None) is not None:

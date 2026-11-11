@@ -75,10 +75,11 @@ def test_rail_modes(win, qapp):
 
 def test_ribbon_toggle_persists(win, qapp, store, monkeypatch):
     assert win.ribbon_visible()
-    win.ribbon_btn.click()                          # nút ở góc phải hàng tiêu đề
+    assert win.ribbon_btn.isHidden()                # 1.0.22: chỉ còn nút ^ ngay trên dải công cụ
+    win.ribbon_hide_btn.click()
     pump(qapp, 20)
     assert not win.ribbon_visible() and store["ui/ribbon"] is False
-    assert "Ctrl+F1" in win.ribbon_btn.toolTip()
+    assert "Ctrl+F1" in win.ribbon_hide_btn.toolTip()
     QTest.keyClick(win, Qt.Key_F1, Qt.ControlModifier)
     pump(qapp, 20)
     assert win.ribbon_visible() and store["ui/ribbon"] is True

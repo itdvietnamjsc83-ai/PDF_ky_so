@@ -76,7 +76,7 @@ class StampDialog(QDialog):
         sub_row = QWidget()
         h = QHBoxLayout(sub_row)
         h.setContentsMargins(0, 0, 0, 0)
-        self.ed_sub = QLineEdit(placeholderText="Dòng nhỏ bên dưới (tùy chọn): ngày, tên người, phòng ban…")
+        self.ed_sub = QLineEdit(placeholderText="Ngày, tên người, phòng ban… (tùy chọn)")
         self.btn_today = QPushButton("Ngày hôm nay")
         self.btn_today.clicked.connect(lambda: self.ed_sub.setText(f"Ngày {date.today():%d/%m/%Y}"))
         h.addWidget(self.ed_sub, 1)
@@ -87,7 +87,7 @@ class StampDialog(QDialog):
         for k, t in items.STAMP_SHAPES:
             self.cb_shape.addItem(t, k)
         f.addRow("Hình dạng:", self.cb_shape)
-        self.ed_arc = QLineEdit(placeholderText="Chữ chạy vòng theo mép (vd. tên đơn vị) – chỉ với dấu tròn")
+        self.ed_arc = QLineEdit(placeholderText="Tên đơn vị chạy vòng (dấu tròn)")
         self.lbl_arc = QLabel("Chữ vòng:")
         f.addRow(self.lbl_arc, self.ed_arc)
 
