@@ -132,7 +132,7 @@ def test_page_context_menu(win, qapp, samples, monkeypatch):
     m = win.build_page_menu()
     seen = [a.text() for a in m.actions()]
     assert "Xóa trang…" in seen and "Chèn trang trắng…" in seen and "Thêm file này vào khay ghép" in seen
-    next(a for a in m.actions() if a.text() == "Xoay trái 90°").trigger()
+    next(a for a in m.actions() if a.text().startswith("Xoay trái 90°")).trigger()
     assert win.current().doc.page_info(0).landscape
 
 

@@ -22,8 +22,8 @@ from .viewer import PageView
 # (mã, nhãn, [nhóm công cụ: [(mã lệnh, nhãn, icon, nổi bật?)]])
 MODES = [
     ("home", "Trang chủ", [
-        [("open", "Mở", "open", 0), ("save", "Lưu", "save", 0), ("saveas", "Lưu thành…", "saveas", 0),
-         ("print", "In", "print", 0)],
+        [("open", "Mở", "open", 0), ("openwin", "Mở cửa sổ mới", "window", 0), ("save", "Lưu", "save", 0),
+         ("saveas", "Lưu thành…", "saveas", 0), ("print", "In", "print", 0)],
         [("undo", "Hoàn tác", "undo", 0), ("redo", "Làm lại", "redo", 0)],
         [("tray", "Khay ghép", "merge", 0), ("image", "Chèn ảnh", "image", 0), ("protect", "Lưu có bảo vệ", "lock", 0),
          ("fileinfo", "Thông tin file", "info", 0)]]),
@@ -67,7 +67,7 @@ MODES = [
 ]
 
 # lệnh đã có ở phiên bản này; còn lại báo giai đoạn phát triển
-READY = {"open", "save", "saveas", "fileinfo", "print", "undo", "redo", "blank", "delete", "rotate", "rotateleft", "insertpdf",
+READY = {"open", "openwin", "save", "saveas", "fileinfo", "print", "undo", "redo", "blank", "delete", "rotate", "rotateleft", "insertpdf",
          "tray", "trayadd", "traytabs", "merge", "mergesign", "split", "resize", "autorotate", "image",
          "stamp", "sigimg", "seam", "digisign", "verify",
          "edittext", "textbox", "hand", "note", "symbol", "shape", "pen", "erase", "find",
@@ -75,7 +75,7 @@ READY = {"open", "save", "saveas", "fileinfo", "print", "undo", "redo", "blank",
          "batchxl", "autofolder", "history", "backup", "toc", "license", "about", "clearhistory",
          "select", "notes", "colormode", "importopts"}
 # dùng được cả khi hết hạn dùng thử / chưa kích hoạt (chỉ xem, in, kiểm tra chữ ký)
-FREE_CMDS = {"open", "print", "verify", "license", "about", "history", "undo", "redo", "clearhistory", "select",
+FREE_CMDS = {"open", "openwin", "print", "verify", "license", "about", "history", "undo", "redo", "clearhistory", "select",
              "notes", "importopts"}
 # lệnh làm thay đổi nội dung -> bị chặn với file được bảo vệ (mở không có mật khẩu chủ sở hữu)
 MODIFY_CMDS = {"blank", "delete", "rotate", "rotateleft", "insertpdf", "autorotate", "resize", "image", "stamp",
@@ -88,6 +88,11 @@ NOT_SUPPORTED = {
     "ocr": "Nhận dạng chữ (OCR) cho file scan sẽ có ở bản cập nhật sau.",
 }
 RAIL_LABEL = {"sign": "Ký & Dấu"}
+# lệnh không cần bấm lên trang -> giữ nguyên hướng xoay khi xem; lệnh khác (công cụ sửa…) đưa trang về hướng gốc
+VIEW_ROT_SAFE = {"open", "openwin", "save", "saveas", "fileinfo", "print", "undo", "redo", "license", "about", "importopts",
+                 "clearhistory", "recentclear", "recentprune", "tray", "trayadd", "traytabs", "history", "backup",
+                 "batchsign", "autofolder", "verify", "presets", "compress", "protect", "password", "printperm",
+                 "rotate", "rotateleft", "autorotate", "viewrotl", "viewrotr", "viewrot0"}
 RAIL_ICON = {"home": "home", "edit": "text", "page": "page", "sign": "stamp", "protect": "shield", "tray": "merge",
              "tools": "gear"}
 CMD_LABEL = {cmd: label for _, _, groups in MODES for g in groups for cmd, label, *_ in g}
@@ -804,6 +809,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().tabBarClicked.connect(lambda _i: self.show_start_page(False))
         self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabs.tabBar().customContextMenuRequested.connect(self._tab_menu)
+        self.tabs.tabBar().installEventFilter(self)
         self.tabs.currentChanged.connect(self._tab_changed)
         self.empty = StartPage()
         self.empty.command.connect(self.run)
@@ -1298,6 +1304,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, ev):
         from PySide6.QtCore import QEvent
+        if hasattr(self, "tabs") and obj is self.tabs.tabBar():
+            self._tabbar_drag(ev)
         if obj is self.tabs and ev.type() == QEvent.Resize:
             QTimer.singleShot(0, self._place_start_overlay)
         if obj is getattr(self, "menubar_row", None) and ev.type() in (QEvent.Resize, QEvent.Polish):
@@ -1498,13 +1506,19 @@ class MainWindow(QMainWindow):
         self.lbl_msg.setMinimumWidth(40)
         self.lbl_paper.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lbl_paper.setMinimumWidth(30)
+        # mở file không được làm cửa sổ tự to ra ("nhảy" kích thước): nhãn loại file co lại được
+        self.lbl_kind.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_kind.setMinimumWidth(0)
         for w in (self.lbl_page, self.lbl_paper, self.lbl_kind):
             sb.addWidget(w)
         sb.addWidget(self.lbl_msg, 1)
         self.btn_fitpage = self._sbtn("fitpage", "Vừa trang (Ctrl+0)", lambda: self._view_call("fit_page"))
         self.btn_fitwidth = self._sbtn("fitwidth", "Vừa chiều rộng (Ctrl+2)", lambda: self._view_call("fit_width"))
         self.btn_zout = self._sbtn("zout", "Thu nhỏ (Ctrl+−)", lambda: self._view_call("zoom_step", -1))
-        self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=400, fixedWidth=140)
+        self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=400)
+        self.slider.setMinimumWidth(60)                 # co lại khi cửa sổ hẹp – không đẩy cửa sổ rộng ra
+        self.slider.setMaximumWidth(140)
+        self.slider.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.slider.valueChanged.connect(self._slider_moved)
         self.btn_zin = self._sbtn("zin", "Phóng to (Ctrl++)", lambda: self._view_call("zoom_step", 1))
         self.lbl_zoom = QLabel("100%")              # (giữ cho mã cũ) – số % hiện trong ô nhập bên cạnh
@@ -1518,8 +1532,42 @@ class MainWindow(QMainWindow):
         self.sp_zoom.setFixedWidth(56)
         self.sp_zoom.setToolTip("Tỉ lệ xem – gõ số rồi Enter (10–1600%)")
         self.sp_zoom.valueChanged.connect(self._slider_moved)
-        for w in (self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.slider, self.btn_zin, self.sp_zoom):
+        # 1.0.22: xoay nhanh khi xem – chỉ đổi cách hiển thị, không sửa file (đóng file không hỏi lưu)
+        self.btn_vrotl = self._sbtn("rotateleft", "Xoay trái khi xem (Ctrl+Shift+−) – chỉ để xem, không thay đổi "
+                                    "file", lambda: self.rotate_view(-90))
+        self.btn_vrotr = self._sbtn("rotate", "Xoay phải khi xem (Ctrl+Shift++) – chỉ để xem, không thay đổi file",
+                                    lambda: self.rotate_view(90))
+        for w in (self.btn_vrotl, self.btn_vrotr, self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.slider,
+                  self.btn_zin, self.sp_zoom):
             sb.addPermanentWidget(w)
+
+    def rotate_view(self, step: int):
+        """Xoay khi xem (step = ±90; 0 = về hướng gốc). Không đổi nội dung file."""
+        tab = self.current()
+        if not tab:
+            return
+        v = tab.view
+        if step and (v.placement is not None or v.tool is not None):
+            v.cancel_placement()
+            v.set_tool(None)
+        v.set_view_rotation(v.view_rot + step if step else 0)
+        self._update_view_rot()
+        if v.view_rot:
+            self._flash(f"Đang xoay {v.view_rot}° để xem (không thay đổi file). Chọn công cụ sửa hoặc "
+                        "Ctrl+Shift+0 để về hướng gốc; muốn lưu hướng xoay vào file thì dùng Trang › Xoay.")
+        else:
+            self._flash("Trang đã về hướng gốc.")
+
+    def _update_view_rot(self):
+        tab = self.current()
+        rot = tab.view.view_rot if tab else 0
+        for b in (getattr(self, "btn_vrotl", None), getattr(self, "btn_vrotr", None)):
+            if b is not None:
+                b.setProperty("on", bool(rot))
+                b.setDown(False)
+        if hasattr(self, "btn_vrotr"):
+            self.btn_vrotr.setToolTip("Xoay phải khi xem (Ctrl+Shift++) – chỉ để xem, không thay đổi file"
+                                      + (f"\nĐang xoay {rot}°" if rot else ""))
 
     def _sbtn(self, ic, tip, fn) -> QToolButton:
         b = QToolButton(toolTip=tip)
@@ -1546,6 +1594,9 @@ class MainWindow(QMainWindow):
         sc(["Ctrl+0"], lambda: self._view_call("fit_page"))
         sc(["Ctrl+1"], lambda: self._view_call("set_zoom", 100))
         sc(["Ctrl+2"], lambda: self._view_call("fit_width"))
+        sc(["Ctrl+Shift++", "Ctrl+Shift+=", "Ctrl+Shift+R"], lambda: self.rotate_view(90))
+        sc(["Ctrl+Shift+-", "Ctrl+Shift+_", "Ctrl+Shift+L"], lambda: self.rotate_view(-90))
+        sc(["Ctrl+Shift+0", "Ctrl+Shift+)"], lambda: self.rotate_view(0))
         sc(["Ctrl+F"], lambda: (self.search.setFocus(), self.search.selectAll()))
         sc(["F3"], lambda: self.search_doc(self.search.text()))
         sc(["Shift+F3"], lambda: self.search_doc(self.search.text(), backward=True))
@@ -1580,7 +1631,7 @@ class MainWindow(QMainWindow):
             self.apply_edition_ui()
         for b, ic in self.mode_buttons:
             b.setIcon(icon(ic, "#FFFFFF" if b.isChecked() else c["railtext"]))
-        for b in (self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.btn_zin):
+        for b in (self.btn_vrotl, self.btn_vrotr, self.btn_fitpage, self.btn_fitwidth, self.btn_zout, self.btn_zin):
             b.setIcon(icon(b.property("icon_name"), c["text"]))
         self.theme_btn.setIcon(icon("sun" if c is theme.DARK else "moon", c["railtext"]))
         self.dev_btn.setIcon(icon("info", c["railtext"]))
@@ -1896,28 +1947,97 @@ class MainWindow(QMainWindow):
         w._update_state()
         return w
 
-    def detach_tab(self, idx: int) -> "MainWindow | None":
-        """Chuyển tab sang cửa sổ mới (giữ nguyên tài liệu, chưa lưu vẫn giữ, hoàn tác vẫn dùng được)."""
+    def detach_tab(self, idx: int, at=None) -> "MainWindow | None":
+        """Chuyển tab sang cửa sổ mới (giữ nguyên tài liệu, chưa lưu vẫn giữ, hoàn tác vẫn dùng được).
+        at = vị trí màn hình (kéo tab ra ngoài): cửa sổ mới hiện tại đó; không có -> xếp 2 cửa sổ cạnh nhau."""
         tab = self.tabs.widget(idx) if idx >= 0 else None
         if not isinstance(tab, DocTab):
+            return None
+        main = getattr(self, "primary", None) or self
+        w = main.new_window()
+        self.move_tab_to(idx, w)
+        if at is not None:
+            if self.isMaximized():
+                w.resize(max(w.minimumSizeHint().width(), self.width() * 2 // 3), self.height() * 2 // 3)
+            w.move(at.x() - 80, at.y() - 20)
+        else:
+            self.tile_windows([self, w])
+        return w
+
+    def move_tab_to(self, idx: int, w: "MainWindow", index: int = -1) -> "DocTab | None":
+        """Chuyển tab sang cửa sổ w (kéo tab sang cửa sổ khác để ghép). Cửa sổ phụ hết tab thì tự đóng."""
+        tab = self.tabs.widget(idx) if idx >= 0 else None
+        if not isinstance(tab, DocTab) or w is self:
             return None
         self._finish_object_edit(tab)
         if tab.view.placement is not None:
             tab.view.cancel_placement()
         doc, title, page = tab.doc, getattr(tab, "title", None), tab.view.current_page()
-        w = self.new_window()
         self.tabs.removeTab(idx)
         if getattr(self, "recovery", None) and getattr(tab, "recovery_key", None):
             self.recovery.discard(tab.recovery_key)
         nt = w.add_document(doc, title)
         nt.sig_ack = tab.sig_ack
+        if 0 <= index < w.tabs.count() - 1:
+            w.tabs.tabBar().moveTab(w.tabs.indexOf(nt), index)
+        w.tabs.setCurrentWidget(nt)
         QTimer.singleShot(50, lambda: nt.view.go_to(page))
         tab.deleteLater()
         if not self.tabs.count():
             self.stack.setCurrentIndex(0)
+            if not self._is_primary():                # cửa sổ phụ không còn file -> đóng luôn
+                QTimer.singleShot(0, self.close)
         self._update_state()
-        self.tile_windows([self, w])
-        return w
+        w._update_state()
+        return nt
+
+    # kéo tab ra ngoài cửa sổ -> tách thành cửa sổ mới; thả vào hàng tab / cửa sổ khác -> ghép vào đó
+    def _tabbar_drag(self, ev) -> bool:
+        from PySide6.QtCore import QEvent
+        bar = self.tabs.tabBar()
+        t = ev.type()
+        if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
+            self._tdrag = [bar.tabAt(ev.position().toPoint()), False]
+        elif t == QEvent.MouseMove and getattr(self, "_tdrag", None) and self._tdrag[0] >= 0:
+            out = not bar.rect().adjusted(-30, -30, 30, 30).contains(ev.position().toPoint())
+            if out != self._tdrag[1]:
+                self._tdrag[1] = out
+                if out:
+                    QApplication.setOverrideCursor(Qt.DragMoveCursor)
+                    self._flash("Thả ra ngoài cửa sổ để tách thành cửa sổ mới; thả vào cửa sổ khác để ghép tab.")
+                else:
+                    QApplication.restoreOverrideCursor()
+        elif t == QEvent.MouseButtonRelease and getattr(self, "_tdrag", None):
+            idx, out = self._tdrag
+            self._tdrag = None
+            if out:
+                QApplication.restoreOverrideCursor()
+                gp = ev.globalPosition().toPoint()
+                QTimer.singleShot(0, lambda: self._tab_dropped(idx, gp))
+        return False
+
+    def _window_at(self, gp) -> "MainWindow | None":
+        for w in self.all_windows():
+            if w.isVisible() and not w.isMinimized() and w.frameGeometry().contains(gp):
+                return w
+        return None
+
+    def _tab_dropped(self, idx: int, gp):
+        if not (0 <= idx < self.tabs.count()):
+            return
+        target = self._window_at(gp)
+        if target is self:
+            return                                    # thả lại trong cửa sổ cũ: không đổi gì
+        if target is not None:
+            bar = target.tabs.tabBar()
+            at = bar.tabAt(bar.mapFromGlobal(gp))
+            self.move_tab_to(idx, target, at)
+            target.bring_to_front()
+            return
+        if self.tabs.count() == 1 and not self._is_primary():
+            self.move(gp.x() - 80, gp.y() - 20)       # cửa sổ phụ chỉ có 1 tab: kéo cả cửa sổ đi
+            return
+        self.detach_tab(idx, at=gp)
 
     def detach_current_tab(self):
         if self.tabs.count():
@@ -1927,12 +2047,14 @@ class MainWindow(QMainWindow):
 
     def open_in_new_window(self, paths=None) -> "MainWindow | None":
         if not paths:
-            paths, _ = QFileDialog.getOpenFileNames(self, "Mở ở cửa sổ mới", self.settings.value("open_dir", ""),
+            paths, _ = QFileDialog.getOpenFileNames(self, "Mở ở cửa sổ mới", self.settings.value("last_dir", ""),
                                                     self.OPEN_FILTER)
             if not paths:
                 return None
-        w = self.new_window()
-        w.open_files(paths)
+            self.settings.setValue("last_dir", os.path.dirname(paths[0]))
+        main = getattr(self, "primary", None) or self
+        w = main.new_window()
+        w.receive_files(paths)
         return w
 
     def tile_windows(self, wins=None):
@@ -1979,7 +2101,141 @@ class MainWindow(QMainWindow):
             if self.tabs.count() == n:  # người dùng bấm Hủy
                 ev.ignore()
                 return
+        self.save_window_state()
         ev.accept()
+
+    # ---------- 1.0.22: nhớ vị trí / cỡ cửa sổ, chọn cửa sổ khi mở file ----------
+    _last_active = None
+
+    def _is_primary(self) -> bool:
+        return getattr(self, "primary", None) is None
+
+    def save_window_state(self):
+        """Nhớ vị trí, cỡ, phóng to của cửa sổ chính cho lần mở sau."""
+        if self._is_primary() and self.isVisible() and not self.isMinimized():
+            self.settings.setValue("ui/geometry", self.saveGeometry())
+
+    def restore_window_state(self) -> bool:
+        """Mở lại đúng vị trí, cỡ lần trước (cửa sổ phải nằm trong màn hình đang có); lần đầu: vừa màn hình."""
+        from PySide6.QtCore import QByteArray
+        g = self.settings.value("ui/geometry")
+        ok = False
+        if g:
+            try:
+                ok = self.restoreGeometry(g if isinstance(g, QByteArray) else QByteArray(g))
+            except Exception:
+                ok = False
+        if ok:
+            fr = self.frameGeometry()
+            screens = [sc.availableGeometry() for sc in QApplication.screens()]
+            # phần thanh tiêu đề phải thấy được trên một màn hình (màn hình phụ đã rút ra -> đưa về màn hình chính)
+            title = fr.adjusted(0, 0, 0, -(fr.height() - 40))
+            if not any(sc.intersected(title).width() >= 120 for sc in screens):
+                ok = False
+        if not ok:
+            scr = QApplication.primaryScreen().availableGeometry()
+            w = min(1440, int(scr.width() * 0.92))
+            h = min(900, int(scr.height() * 0.9))
+            self.resize(max(w, self.minimumSizeHint().width()), h)
+            self.move(scr.x() + (scr.width() - self.width()) // 2, scr.y() + (scr.height() - self.height()) // 2)
+        return ok
+
+    def changeEvent(self, ev):
+        from PySide6.QtCore import QEvent
+        if ev.type() == QEvent.ActivationChange and self.isActiveWindow():
+            MainWindow._last_active = self
+        super().changeEvent(ev)
+
+    def moveEvent(self, ev):
+        super().moveEvent(ev)
+        self._geo_later()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._geo_later()
+
+    def _geo_later(self):
+        if not self._is_primary():
+            return
+        t = getattr(self, "_geo_timer", None)
+        if t is None:
+            t = self._geo_timer = QTimer(self, singleShot=True, interval=800, timeout=self.save_window_state)
+        t.start()
+
+    def bring_to_front(self):
+        """Đưa cửa sổ lên trước, GIỮ NGUYÊN cỡ (đang phóng to vẫn phóng to; chỉ bỏ thu nhỏ xuống thanh tác vụ)."""
+        if self.isMinimized():
+            self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def choose_window(self, paths, default=None) -> "MainWindow | None":
+        """Đang mở từ 2 cửa sổ trở lên: hỏi mở file vào cửa sổ nào (hoặc cửa sổ mới). None = hủy."""
+        wins = [w for w in self.all_windows() if w.isVisible()]
+        if len(wins) < 2:
+            return default or (wins[0] if wins else self)
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
+        last = default or MainWindow._last_active
+        if last not in wins:
+            last = wins[0]
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Mở ở cửa sổ nào?")
+        lay = QVBoxLayout(dlg)
+        names = ", ".join(os.path.basename(p) for p in paths[:3]) + (f" và {len(paths) - 3} file khác"
+                                                                       if len(paths) > 3 else "")
+        lb = QLabel(f"Đang có {len(wins)} cửa sổ. Mở <b>{names}</b> vào:")
+        lb.setWordWrap(True)
+        lay.addWidget(lb)
+        lst = QListWidget()
+        for k, w in enumerate(wins):
+            docs = [w.tabs.widget(i).doc.name for i in range(w.tabs.count())]
+            desc = ", ".join(docs[:3]) + ("…" if len(docs) > 3 else "") if docs else "chưa mở file"
+            it = QListWidgetItem(f"Cửa sổ {k + 1}{' (chính)' if w._is_primary() else ''}{' – đang dùng' if w is last else ''}"
+                                 f": {desc}")
+            it.setData(Qt.UserRole, k)
+            lst.addItem(it)
+        it = QListWidgetItem("＋ Mở ở cửa sổ mới")
+        it.setData(Qt.UserRole, -1)
+        lst.addItem(it)
+        lst.setCurrentRow(wins.index(last))
+        lst.itemDoubleClicked.connect(lambda *_: dlg.accept())
+        lst.setMinimumWidth(420)
+        lay.addWidget(lst)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Mở")
+        bb.button(QDialogButtonBox.Cancel).setText("Hủy")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if self._ask_window_dialog(dlg) != QDialog.Accepted or lst.currentItem() is None:
+            return None
+        k = lst.currentItem().data(Qt.UserRole)
+        if k == -1:
+            main = getattr(self, "primary", None) or self
+            return main.new_window()
+        return wins[k]
+
+    def _ask_window_dialog(self, dlg):
+        return dlg.exec()
+
+    def receive_external(self, items: list[str]):
+        """File mở từ ngoài (nháy đúp trong Explorer / Finder, phiên khác): có nhiều cửa sổ thì hỏi mở vào đâu;
+        đưa cửa sổ đó lên trước mà không đổi cỡ cửa sổ."""
+        opens = [x for x in items if not x.startswith("tray:")]
+        target = self
+        if opens:
+            target = self.choose_window(opens)
+            if target is None:
+                target = None if len(opens) == len(items) else self
+        if target is None:
+            return
+        if target is not self and len(opens) != len(items):
+            self.receive_files([x for x in items if x.startswith("tray:")])
+            target.receive_files(opens)
+        else:
+            target.receive_files(items)
+        target.bring_to_front()
 
     # ---------- bản quyền ----------
     def license_status(self, fresh: bool = False):
@@ -2225,12 +2481,25 @@ class MainWindow(QMainWindow):
     # ---------- lệnh ----------
     def run(self, cmd: str):
         tab = self.current()
+        if cmd in ("viewrotl", "viewrotr", "viewrot0"):
+            self.rotate_view({"viewrotl": -90, "viewrotr": 90, "viewrot0": 0}[cmd])
+            return
+        if tab and tab.view.view_rot and cmd not in VIEW_ROT_SAFE:
+            tab.view.set_view_rotation(0)            # chỉnh sửa cần trang đúng hướng gốc
+            self._update_view_rot()
         if cmd == "open":
             last = self.settings.value("last_dir", "")
             paths, _ = QFileDialog.getOpenFileNames(self, "Mở PDF / Word / Excel / ảnh", last, self.OPEN_FILTER)
             if paths:
                 self.settings.setValue("last_dir", os.path.dirname(paths[0]))
-                self.import_files(paths)
+                target = self.choose_window(paths, default=self)
+                if target is not None:
+                    target.import_files(paths)
+                    if target is not self:
+                        target.bring_to_front()
+            return
+        if cmd == "openwin":                          # 1.0.22: mở file ở cửa sổ mới (để xem / so 2 file cạnh nhau)
+            self.open_in_new_window()
             return
         if cmd == "importopts":
             from .ui_import import ImportSettingsDialog
@@ -2556,7 +2825,11 @@ class MainWindow(QMainWindow):
             return None
         m = QMenu(self)
         c = self.colors["text"]
-        for cmd, label, ic in (("rotate", "Xoay phải 90°", "rotate"), ("rotateleft", "Xoay trái 90°", "rotate"),
+        m.addAction(icon("rotateleft", c), "Xoay trái khi xem (không đổi file)", lambda: self.rotate_view(-90))
+        m.addAction(icon("rotate", c), "Xoay phải khi xem (không đổi file)", lambda: self.rotate_view(90))
+        m.addSeparator()
+        for cmd, label, ic in (("rotate", "Xoay phải 90° (lưu vào file)", "rotate"),
+                               ("rotateleft", "Xoay trái 90° (lưu vào file)", "rotate"),
                                ("autorotate", "Tự xoay đúng hướng", "autorotate"), (None, None, None),
                                ("blank", "Chèn trang trắng…", "page"),
                                ("insertpdf", "Chèn trang từ file PDF…", "pageadd"),

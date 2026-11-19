@@ -12,7 +12,7 @@ import math
 from collections import OrderedDict
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
+from PySide6.QtGui import QColor, QImage, QPainter, QTransform, QWheelEvent
 from PySide6.QtWidgets import QScrollArea, QWidget
 
 from .document import PdfDocument
@@ -308,6 +308,9 @@ class PageView(QScrollArea):
         # lớp tô màu phía trên trang (không ghi vào file): "search" (chỗ tìm thấy – vàng), "search_cur" (chỗ đang
         # xem – cam), "select" (chữ đang bôi chọn – xanh). {loại: {trang: [(x0, y0, x1, y1) pt]}}
         self.marks: dict[str, dict[int, list]] = {}
+        # 1.0.22: xoay khi xem (0/90/180/270, theo chiều kim đồng hồ) – chỉ đổi cách hiển thị, KHÔNG ghi vào file;
+        # khi đang xoay thì chỉ xem (bấm lên trang không chọn / sửa gì)
+        self.view_rot = 0
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.relayout()
 
@@ -316,9 +319,31 @@ class PageView(QScrollArea):
     def scale(self) -> float:
         return self.zoom / 100 * PX_PER_PT
 
+    def disp_size_pt(self, i: int) -> tuple[float, float]:
+        """Cỡ trang như đang hiển thị (đã tính xoay khi xem)."""
+        w, h = self.doc.page_size_pt(i)
+        return (h, w) if self.view_rot in (90, 270) else (w, h)
+
+    def set_view_rotation(self, deg: int):
+        """Xoay khi xem (không đổi file). Giữ nguyên trang đang xem."""
+        deg %= 360
+        if deg == self.view_rot:
+            return
+        cur = self._current
+        self.view_rot = deg
+        self.clear_text_selection()
+        self._band = self._tsel = None
+        self.relayout()
+        self.go_to(cur)
+        self.canvas.update()
+
+    def rotate_view(self, step: int):
+        """step = 90 (phải) hoặc -90 (trái)."""
+        self.set_view_rotation(self.view_rot + step)
+
     def relayout(self):
         s = self.scale
-        sizes = [self.doc.page_size_pt(i) for i in range(self.doc.page_count)]
+        sizes = [self.disp_size_pt(i) for i in range(self.doc.page_count)]
         maxw = max((w for w, _ in sizes), default=0) * s
         cw = max(self.viewport().width(), int(maxw + 2 * MARGIN))
         y = MARGIN
@@ -401,7 +426,7 @@ class PageView(QScrollArea):
     def fit_page(self):
         if not self._rects:
             return
-        w, h = self.doc.page_size_pt(self._current)
+        w, h = self.disp_size_pt(self._current)
         vw = self.viewport().width() - 2 * MARGIN
         vh = self.viewport().height() - 2 * MARGIN
         self.set_zoom(min(vw / (w * PX_PER_PT), vh / (h * PX_PER_PT)) * 100)
@@ -410,7 +435,7 @@ class PageView(QScrollArea):
     def fit_width(self):
         if not self._rects:
             return
-        maxw = max(self.doc.page_size_pt(i)[0] for i in range(self.doc.page_count))
+        maxw = max(self.disp_size_pt(i)[0] for i in range(self.doc.page_count))
         vw = self.viewport().width() - 2 * MARGIN - self.verticalScrollBar().sizeHint().width()
         self.set_zoom(vw / (maxw * PX_PER_PT) * 100)
 
@@ -481,10 +506,14 @@ class PageView(QScrollArea):
             _, old = self._cache.popitem(last=False)
             self._cache_px -= old.width() * old.height()
 
+    def _full_key(self):
+        return ("r", self.view_rot) if self.view_rot else None
+
     def _best_cached(self, i: int):
         best = None
+        full = self._full_key()
         for (ver, pi, sc, clip), img in self._cache.items():
-            if ver == self.doc.version and pi == i and clip is None:
+            if ver == self.doc.version and pi == i and clip == full:
                 if best is None or abs(sc - self.scale) < abs(best[0] - self.scale):
                     best = (sc, img)
         return best
@@ -496,6 +525,7 @@ class PageView(QScrollArea):
         s = self.scale
         fast = self._fast_pass
         self._fast_pass = False
+        rot = self.view_rot
         visible = QRectF(self.horizontalScrollBar().value(), self.verticalScrollBar().value(),
                          self.viewport().width(), self.viewport().height())
         for i, r in enumerate(self._rects):
@@ -506,7 +536,7 @@ class PageView(QScrollArea):
             p.fillRect(r, Qt.white)
             full_px = r.width() * r.height() * dpr * dpr
             if full_px <= FULL_RENDER_LIMIT:
-                key = (self.doc.version, i, round(s * dpr, 4), None)
+                key = (self.doc.version, i, round(s * dpr, 4), self._full_key())
                 img = self._cache.get(key)
                 if img is None and fast:
                     cached = self._best_cached(i)
@@ -515,6 +545,8 @@ class PageView(QScrollArea):
                         continue
                 if img is None:
                     img = to_qimage(self.doc.render(i, s * dpr))
+                    if rot:
+                        img = img.transformed(QTransform().rotate(rot))
                     img.setDevicePixelRatio(dpr)
                     self._cache_put(key, img)
                 else:
@@ -531,7 +563,8 @@ class PageView(QScrollArea):
                 ax1, ay1 = (part.right() - r.left()) * dpr, (part.bottom() - r.top()) * dpr
                 tiles = [(tx, ty) for ty in range(int(ay0 // TILE), int(max(ay0, ay1 - 1) // TILE) + 1)
                          for tx in range(int(ax0 // TILE), int(max(ax0, ax1 - 1) // TILE) + 1)]
-                keys = [(self.doc.version, i, round(S, 4), ("t", tx, ty)) for tx, ty in tiles]
+                keys = [(self.doc.version, i, round(S, 4), ("t", tx, ty, rot)) for tx, ty in tiles]
+                Wu, Hu = (hd, wd) if rot in (90, 270) else (wd, hd)       # cỡ trang gốc (chưa xoay khi xem), px
                 if fast and any(k not in self._cache for k in keys):
                     cached = self._best_cached(i)
                     if cached:
@@ -542,13 +575,27 @@ class PageView(QScrollArea):
                     x1, y1 = min(wd, x0 + TILE), min(hd, y0 + TILE)
                     img = self._cache.get(key)
                     if img is None:
-                        crop = (x0 / S, max(0.0, (hd - y1) / S), max(0.0, (wd - x1) / S), y0 / S)
+                        # ô đang thấy (toạ độ đã xoay) -> vùng tương ứng trên trang gốc
+                        if rot == 90:
+                            ux0, ux1, uy0, uy1 = y0, y1, Hu - x1, Hu - x0
+                        elif rot == 180:
+                            ux0, ux1, uy0, uy1 = Wu - x1, Wu - x0, Hu - y1, Hu - y0
+                        elif rot == 270:
+                            ux0, ux1, uy0, uy1 = Wu - y1, Wu - y0, x0, x1
+                        else:
+                            ux0, ux1, uy0, uy1 = x0, x1, y0, y1
+                        crop = (ux0 / S, max(0.0, (Hu - uy1) / S), max(0.0, (Wu - ux1) / S), uy0 / S)
                         img = to_qimage(self.doc.render(i, S, crop=crop))
+                        if rot:
+                            img = img.transformed(QTransform().rotate(rot))
                         self._cache_put(key, img)
                     else:
                         self._cache.move_to_end(key)
                     p.drawImage(QRectF(r.left() + x0 / dpr, r.top() + y0 / dpr,
                                        (x1 - x0) / dpr, (y1 - y0) / dpr), img)
+        if rot:                                  # xoay khi xem: chỉ xem, không vẽ lớp chọn / công cụ
+            p.end()
+            return
         if self.marks:
             self._paint_marks(p, QRectF(area))
         if self.show_grid and self.snap_grid > 0:
@@ -737,7 +784,10 @@ class PageView(QScrollArea):
 
     # ---------- đặt ảnh / con dấu / nội dung đã thêm lên trang ----------
     def page_at(self, pos) -> tuple[int, float, float] | None:
-        """Điểm trên canvas -> (trang, x_pt, y_pt) nếu nằm trong một trang."""
+        """Điểm trên canvas -> (trang, x_pt, y_pt) nếu nằm trong một trang.
+        Đang xoay khi xem -> None (chỉ xem: không chọn / sửa nội dung)."""
+        if self.view_rot:
+            return None
         s = self.scale
         for i, r in enumerate(self._rects):
             if r.contains(pos):

@@ -122,6 +122,7 @@ def main():
             w, APP_NAME, f"Đã xảy ra lỗi nhưng phần mềm vẫn chạy tiếp.\n\n{msg}\n\nChi tiết: {log_path}"))
     stability.install_excepthook(show_error)
 
+    w.restore_window_state()             # mở lại đúng vị trí, cỡ lần trước
     w.show()
     from app import license as L
     st = L.status()
@@ -142,12 +143,11 @@ def main():
     w.enable_recovery()                  # tự lưu bản khôi phục + hỏi khôi phục sau sự cố
     w.start_retention()                  # tự xóa lịch sử quá hạn theo thời hạn người dùng đặt
     w.start_autofolder()                 # thư mục tự xử lý (nếu người dùng đã bật)
-    single.filesReceived.connect(lambda fs: (w.receive_files(fs), w.showNormal(), w.raise_(), w.activateWindow()))
+    # 1.0.22: không showNormal() nữa (làm cửa sổ đang phóng to bị thu về cỡ khác – "nhảy" khi mở file);
+    # có nhiều cửa sổ thì hỏi mở vào cửa sổ nào
+    single.filesReceived.connect(w.receive_external)
     def from_finder(fs):
-        w.receive_files(fs)
-        w.showNormal()
-        w.raise_()
-        w.activateWindow()
+        w.receive_external(fs)
     opener.handler = from_finder
     files += [f for f in opener.take_pending() if f not in files]
     if files:

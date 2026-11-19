@@ -392,6 +392,19 @@ Khi đặt ảnh, con dấu, chữ ký ảnh, nét chữ tay của mình lên tr
   màu thật giữ màu); **Đếm trang màu**; lựa chọn màu lưu trong mẫu khay; **Lưu thêm bản đen trắng**.
 - **Mở ảnh (9c, 9f):** khổ giấy, lề, co/phóng vừa khổ, chất lượng (200 / 150 / 100 dpi) để file nhẹ.
 
+## Bản 1.0.25 (19/11/2026)
+- **Xoay nhanh khi xem**: nút ⟲ ⟳ ở thanh trạng thái (cạnh nút vừa trang), Ctrl+Shift++ / Ctrl+Shift+−,
+  Ctrl+Shift+0 về hướng gốc, menu chuột phải lên ảnh trang. Chỉ đổi cách hiển thị, không sửa file nên đóng file
+  không hỏi lưu. Đang xoay thì chỉ xem; chọn công cụ sửa sẽ tự đưa trang về hướng gốc. Muốn lưu hướng xoay vào file:
+  Trang › Xoay trái / Xoay phải.
+- **Nhớ vị trí, cỡ cửa sổ** lần mở cuối (kể cả phóng to); màn hình phụ đã rút ra thì mở về màn hình chính.
+  Mở file từ Explorer / Finder không còn làm cửa sổ đang phóng to bị thu về cỡ khác; mở file không làm cửa sổ to ra.
+- **Nhiều cửa sổ**: nút "Mở cửa sổ mới" ở Trang chủ; khi đang có từ 2 cửa sổ, mở file sẽ hỏi mở vào cửa sổ nào.
+  Kéo tab ra ngoài cửa sổ -> tách thành cửa sổ mới; kéo tab thả vào cửa sổ khác -> ghép thành tab cạnh nhau
+  (cửa sổ phụ hết tab tự đóng). Menu chuột phải lên tab "Mở ở cửa sổ riêng" vẫn giữ.
+- Hàng menu chính: ô tìm kiếm, menu "Tùy chỉnh giao diện"; con dấu chữ tùy biến; cảnh báo khi sửa chữ phải đổi
+  phông / cỡ (xem mục 1.0.22 bên dưới).
+
 ## Bản 1.0.22 (16 góp ý của anh Dũng)
 
 - Đã bỏ tính năng **Gửi email** (nút trên thanh Trang chủ, MAPI/Mail) theo yêu cầu.
