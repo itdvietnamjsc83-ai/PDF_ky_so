@@ -21,16 +21,42 @@ OFFICE_GROUP = os.path.expanduser("~/Library/Group Containers/UBF8T346G9.Office"
 APPS = {"word": "Microsoft Word", "excel": "Microsoft Excel", "powerpoint": "Microsoft PowerPoint"}
 
 _SCRIPTS = {
+    # 1.0.25: không dùng "active document" ngay sau "open" nữa – Word mở file bất đồng bộ (hộp thoại cấp quyền,
+    # chuyển định dạng .doc…) nên lệnh save as gửi tới chưa phải tài liệu -> lỗi -1708. Chờ tới khi tài liệu
+    # mở xong (tìm theo tên file), thử lưu PDF lại tới khi được.
     "word": '''on run argv
   set src to item 1 of argv
   set dst to item 2 of argv
-  tell application "Microsoft Word"
-    open (POSIX file src)
-    set theDoc to active document
-    save as theDoc file name dst file format format PDF
-    close theDoc saving no
-  end tell
-  return "OK"
+  set srcName to ""
+  if (count of argv) > 2 then set srcName to item 3 of argv
+  tell application "Microsoft Word" to open (POSIX file src)
+  set lastErr to "Word chưa mở xong tài liệu"
+  repeat 120 times
+    tell application "Microsoft Word"
+      try
+        set theDoc to missing value
+        repeat with i from 1 to (count of documents)
+          if (name of document i) is srcName then set theDoc to document i
+        end repeat
+        if theDoc is missing value and srcName is "" and (count of documents) > 0 then set theDoc to document 1
+        if theDoc is not missing value then
+          try
+            save as theDoc file name dst file format format PDF
+          on error
+            save as theDoc file name ((POSIX file dst) as string) file format format PDF
+          end try
+          try
+            close theDoc saving no
+          end try
+          return "OK"
+        end if
+      on error errMsg number errNum
+        set lastErr to errMsg & " (" & errNum & ")"
+      end try
+    end tell
+    delay 1
+  end repeat
+  error lastErr
 end run''',
     "excel": '''on run argv
   set src to item 1 of argv
@@ -95,6 +121,15 @@ def office_app_installed(kind: str) -> bool:
                for base in ("/Applications", os.path.expanduser("~/Applications")))
 
 
+def _unquarantine(path: str):
+    """File tải từ mạng / Zalo mang cờ "quarantine": Word mở ở chế độ Xem được bảo vệ (Protected View), không lưu
+    PDF được. Bản chép tạm của mình thì bỏ cờ này (file gốc giữ nguyên)."""
+    try:
+        subprocess.run(["/usr/bin/xattr", "-d", "com.apple.quarantine", path], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, timeout: int = 180) -> str | None:
     """Chuyển bằng Microsoft Office cho Mac. Trả về tên ứng dụng đã dùng, None nếu máy không có Office."""
     from .office import OfficeError
@@ -109,7 +144,10 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
         tmp_src = os.path.join(work, os.path.basename(src))
         shutil.copy2(src, tmp_src)
         tmp_dst = os.path.join(work, os.path.splitext(os.path.basename(src))[0] + ".pdf")
+        _unquarantine(tmp_src)
         args = ["/usr/bin/osascript", "-e", _SCRIPTS[kind], tmp_src, tmp_dst]
+        if kind == "word":
+            args.append(os.path.basename(tmp_src))
         if kind == "excel" and excel:
             args += ["|".join(excel.get("sheets") or []), excel.get("fit") or "", excel.get("orientation") or ""]
         try:
@@ -158,23 +196,106 @@ def services_dir() -> str:
     return os.path.expanduser("~/Library/PDF Services")
 
 
+def helpers_dir() -> str:
+    return os.path.expanduser("~/Library/Application Support/PdfKySo/pdfservices")
+
+
+# 1.0.25: mục PDF Services là ứng dụng nhỏ (applet AppleScript) thay cho script sh.
+# Lý do: script sh chạy BÊN TRONG tiến trình của ứng dụng đang in. Word / Excel / PowerPoint cho Mac chạy trong
+# hộp cát (sandbox) nên script không ghi được vào thư mục của PDF Ký Số -> macOS báo lỗi khi in từ Word.
+# Applet được macOS mở như một ứng dụng riêng (ngoài hộp cát), nhận file PDF vừa in qua sự kiện "open".
+_APPLET = '''on open theFiles
+  repeat with f in theFiles
+    set p to POSIX path of f
+    set n to name of (info for f)
+    if n ends with ".pdf" then set n to text 1 thru -5 of n
+    do shell script "/bin/sh " & quoted form of "@HELPER@" & " " & quoted form of n & " '' " & quoted form of p
+  end repeat
+end open
+
+on run
+  display dialog "Mục này dùng trong hộp thoại In của mọi ứng dụng: bấm nút PDF ▾ rồi chọn \"@TITLE@\"." buttons {"OK"} default button 1 with title "PDF Ký Số"
+end run
+'''
+
+
+def _osacompile() -> str | None:
+    p = "/usr/bin/osacompile"
+    return p if os.path.isfile(p) else shutil.which("osacompile")
+
+
+def _write_if_changed(path: str, content: str, mode: int = 0o755) -> bool:
+    old = open(path, encoding="utf-8").read() if os.path.isfile(path) else None
+    if old != content:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    os.chmod(path, mode)
+    return old != content
+
+
+def _make_applet(app_path: str, source: str) -> bool:
+    """Dịch applet bằng osacompile (có sẵn trên mọi máy Mac). Ghi nhớ mã nguồn để lần sau không dịch lại."""
+    tool = _osacompile()
+    if not tool:
+        return False
+    stamp = os.path.join(helpers_dir(), os.path.basename(app_path) + ".applescript")
+    exe_ok = os.path.isdir(os.path.join(app_path, "Contents", "MacOS"))
+    if exe_ok and os.path.isfile(stamp) and open(stamp, encoding="utf-8").read() == source:
+        return True
+    tmp = app_path + ".tmp-build.app"
+    shutil.rmtree(tmp, ignore_errors=True)
+    src = stamp + ".tmp"
+    with open(src, "w", encoding="utf-8") as f:
+        f.write(source)
+    try:
+        r = subprocess.run([tool, "-o", tmp, src], capture_output=True, text=True, errors="replace", timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    finally:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+    if r.returncode != 0 or not os.path.isdir(tmp):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return False
+    shutil.rmtree(app_path, ignore_errors=True)
+    os.replace(tmp, app_path)
+    with open(stamp, "w", encoding="utf-8") as f:
+        f.write(source)
+    return True
+
+
 def install_pdf_services(spool_root: str | None = None) -> list[str]:
-    """Tạo 3 mục trong nút PDF ▾ của hộp thoại In (mọi ứng dụng). Gọi lại nhiều lần không sao."""
+    """Tạo 3 mục trong nút PDF ▾ của hộp thoại In (mọi ứng dụng). Gọi lại nhiều lần không sao.
+    Trả về đường dẫn các mục đã cài (".app" nếu dịch được applet, không thì script sh như bản cũ)."""
     from .spool import spool_root as _root
     root = spool_root or _root()
     out = []
     d = services_dir()
     os.makedirs(d, exist_ok=True)
+    try:
+        os.makedirs(helpers_dir(), exist_ok=True)
+    except OSError:
+        pass
     for kind, title in SERVICES.items():
-        p = os.path.join(d, title)
         content = _SERVICE_SH.format(dest=os.path.join(root, kind), bundle=BUNDLE_ID)
+        sh_in_services = os.path.join(d, title)
+        app = os.path.join(d, title + ".app")
         try:
-            old = open(p, encoding="utf-8").read() if os.path.isfile(p) else ""
-            if old != content:
-                with open(p, "w", encoding="utf-8") as f:
-                    f.write(content)
-            os.chmod(p, 0o755)
-            out.append(p)
+            helper = os.path.join(helpers_dir(), kind + ".sh")
+            _write_if_changed(helper, content)
+            source = _APPLET.replace("@HELPER@", helper).replace("@TITLE@", title)
+            if _make_applet(app, source):
+                if os.path.isfile(sh_in_services):       # bỏ mục script sh của bản cũ (trùng tên trong menu)
+                    os.remove(sh_in_services)
+                out.append(app)
+                continue
+        except OSError:
+            pass
+        try:                                             # không dịch được applet: dùng script sh như cũ
+            _write_if_changed(sh_in_services, content)
+            out.append(sh_in_services)
         except OSError:
             pass
     return out
@@ -182,18 +303,24 @@ def install_pdf_services(spool_root: str | None = None) -> list[str]:
 
 def remove_pdf_services():
     for title in SERVICES.values():
+        p = os.path.join(services_dir(), title)
         try:
-            os.remove(os.path.join(services_dir(), title))
+            os.remove(p)
         except OSError:
             pass
+        shutil.rmtree(p + ".app", ignore_errors=True)
+
+
+def _installed(title: str) -> bool:
+    p = os.path.join(services_dir(), title)
+    return os.path.isfile(p) or os.path.isdir(p + ".app")
 
 
 def selftest() -> str:
     parts = []
     parts.append("Office: " + (", ".join(n for k, n in APPS.items() if office_app_installed(k)) or "không có"))
     parts.append("LibreOffice: " + ("có" if find_libreoffice() else "không có"))
-    parts.append("PDF Services: " + ("có" if all(os.path.isfile(os.path.join(services_dir(), t))
-                                                 for t in SERVICES.values()) else "chưa cài"))
+    parts.append("PDF Services: " + ("có" if all(_installed(t) for t in SERVICES.values()) else "chưa cài"))
     return "; ".join(parts)
 
 

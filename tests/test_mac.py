@@ -115,6 +115,10 @@ def test_office_to_pdf_applescript(monkeypatch, tmp_path):
     seen = {}
 
     def fake_run(args, **k):
+
+        if args[0] != "/usr/bin/osascript":           # xattr bỏ cờ quarantine
+
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         seen["args"] = args
         with open(args[4], "wb") as f:              # "Excel" ghi ra file PDF
             f.write(b"%PDF-1.7 ok")
@@ -248,3 +252,61 @@ def test_installer_files():
     if sys.platform != "win32":
         subprocess.run(["bash", "-n", sh], check=True)
         subprocess.run(["bash", "-n", post], check=True)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="script sh")
+def test_pdf_services_applet_replaces_old_script(monkeypatch, tmp_path):
+    """1.0.25: Word cho Mac chạy trong hộp cát -> mục PDF Services phải là applet (.app), bỏ script sh cũ."""
+    svc = tmp_path / "PDF Services"
+    monkeypatch.setattr(macintegration, "services_dir", lambda: str(svc))
+    monkeypatch.setattr(macintegration, "helpers_dir", lambda: str(tmp_path / "helpers"))
+    fake = tmp_path / "osacompile"
+    log = tmp_path / "calls.txt"
+    fake.write_text('#!/bin/sh\necho x >> "%s"\nmkdir -p "$2/Contents/MacOS"\ncp "$3" "$2/Contents/main.applescript"\n' % log)
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(macintegration, "_osacompile", lambda: str(fake))
+    svc.mkdir()
+    old = svc / macintegration.SERVICES["sign"]
+    old.write_text("#!/bin/sh\n")
+    spool = tmp_path / "spool"
+    made = macintegration.install_pdf_services(str(spool))
+    assert made and all(m.endswith(".app") for m in made) and len(made) == 3
+    assert not old.exists()
+    src = (svc / (macintegration.SERVICES["tray"] + ".app") / "Contents" / "main.applescript").read_text(encoding="utf-8")
+    helper = tmp_path / "helpers" / "tray.sh"
+    assert "on open theFiles" in src and str(helper) in src
+    assert str(spool / "tray") in helper.read_text(encoding="utf-8")
+    assert macintegration.install_pdf_services(str(spool)) == made     # lần 2 không dịch lại
+    assert len(log.read_text().split()) == 3
+    assert "PDF Services: có" in macintegration.selftest()
+    # applet gọi helper như sau: sh helper "<tên>" "" "<file pdf>"
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    (bindir / "open").write_text("#!/bin/sh\nexit 0\n"); os.chmod(bindir / "open", 0o755)
+    pdf = tmp_path / "Hop dong.pdf"; pdf.write_bytes(b"%PDF-1.4 x")
+    subprocess.run(["/bin/sh", str(helper), "Hop dong", "", str(pdf)], check=True,
+                   env=dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}"))
+    assert len(os.listdir(spool / "tray")) == 1
+    macintegration.remove_pdf_services()
+    assert not os.listdir(svc)
+
+
+def test_word_script_waits_for_document(monkeypatch, tmp_path):
+    """Lỗi -1708 trên Mac: không gửi save as tới "active document" ngay sau open; chờ tài liệu theo tên file."""
+    sc = macintegration._SCRIPTS["word"]
+    assert "active document" not in sc and "repeat 120 times" in sc and "srcName" in sc
+    monkeypatch.setattr(macintegration, "OFFICE_GROUP", str(tmp_path / "group"))
+    monkeypatch.setattr(macintegration, "office_app_installed", lambda k: True)
+    calls = []
+
+    def fake_run(args, **k):
+        calls.append(args)
+        if args[0] == "/usr/bin/osascript":
+            with open(args[4], "wb") as f:
+                f.write(b"%PDF-1.7 ok")
+        return subprocess.CompletedProcess(args, 0, stdout="OK", stderr="")
+    monkeypatch.setattr(macintegration.subprocess, "run", fake_run)
+    src = tmp_path / "hop dong.docx"
+    src.write_bytes(b"PK")
+    assert macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word") == "Microsoft Word"
+    assert calls[0][:3] == ["/usr/bin/xattr", "-d", "com.apple.quarantine"]
+    assert calls[1][-1] == "hop dong.docx"
