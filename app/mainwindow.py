@@ -1504,11 +1504,10 @@ class MainWindow(QMainWindow):
         # thông báo dài không được bắt cửa sổ rộng ra (chia đôi màn hình): co lại, rê chuột xem đủ
         self.lbl_msg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lbl_msg.setMinimumWidth(40)
-        self.lbl_paper.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.lbl_paper.setMinimumWidth(30)
-        # mở file không được làm cửa sổ tự to ra ("nhảy" kích thước): nhãn loại file co lại được
-        self.lbl_kind.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.lbl_kind.setMinimumWidth(0)
+        # đủ chỗ: hiện đủ chữ; cửa sổ hẹp: co lại – mở file không làm cửa sổ tự to ra ("nhảy" kích thước)
+        for lb in (self.lbl_paper, self.lbl_kind):
+            lb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            lb.setMinimumWidth(1)
         for w in (self.lbl_page, self.lbl_paper, self.lbl_kind):
             sb.addWidget(w)
         sb.addWidget(self.lbl_msg, 1)
@@ -1529,7 +1528,7 @@ class MainWindow(QMainWindow):
         self.sp_zoom.setKeyboardTracking(False)
         self.sp_zoom.setButtonSymbols(QSpinBox.NoButtons)
         self.sp_zoom.setAlignment(Qt.AlignRight)
-        self.sp_zoom.setFixedWidth(56)
+        self.sp_zoom.setFixedWidth(self.sp_zoom.fontMetrics().horizontalAdvance("1600%") + 22)
         self.sp_zoom.setToolTip("Tỉ lệ xem – gõ số rồi Enter (10–1600%)")
         self.sp_zoom.valueChanged.connect(self._slider_moved)
         # 1.0.22: xoay nhanh khi xem – chỉ đổi cách hiển thị, không sửa file (đóng file không hỏi lưu)

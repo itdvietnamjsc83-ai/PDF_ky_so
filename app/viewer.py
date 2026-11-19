@@ -342,6 +342,8 @@ class PageView(QScrollArea):
         self.set_view_rotation(self.view_rot + step)
 
     def relayout(self):
+        if getattr(self.doc, "closed", False):        # tab vừa đóng (chờ hủy) mà vẫn nhận sự kiện đổi cỡ
+            return
         s = self.scale
         sizes = [self.disp_size_pt(i) for i in range(self.doc.page_count)]
         maxw = max((w for w, _ in sizes), default=0) * s
@@ -519,6 +521,8 @@ class PageView(QScrollArea):
         return best
 
     def _paint(self, w: QWidget, area: QRect):
+        if getattr(self.doc, "closed", False):
+            return
         p = QPainter(w)
         p.fillRect(area, self.canvas_color)
         dpr = w.devicePixelRatioF()

@@ -1168,6 +1168,9 @@ class PdfDocument:
     def close(self):
         self._drop_pages()
         self.pdf.close()
+        self.closed = True
+
+    closed = False
 
 
 def _scale_alpha(bgra: bytes, w: int, h: int, k: float) -> bytes:
