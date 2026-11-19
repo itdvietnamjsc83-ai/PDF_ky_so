@@ -1204,6 +1204,10 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(icon("window", self.colors["text"]), "Mở tab đang xem ở cửa sổ riêng", self.detach_current_tab)
         m.addAction("Mở file ở cửa sổ mới…", lambda: self.open_in_new_window())
+        # 1.0.25: kiểu tab ngang không có cột trái -> đổi sáng/tối, thông tin nhà phát triển đặt ở menu này
+        m.addSeparator()
+        self.theme_action = m.addAction("Giao diện sáng / tối", self.toggle_theme)
+        m.addAction("Thông tin nhà phát triển", self.show_developer)
         self.layout_btn.setMenu(m)
         for key in ("thumbs", "rail", "side"):
             self.set_panel_visible(key, self._bool_setting(f"ui/{key}", True), save=False)
