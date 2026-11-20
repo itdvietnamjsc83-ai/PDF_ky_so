@@ -251,8 +251,13 @@ def to_pdf(src: str, dst: str | None = None, excel: dict | None = None) -> tuple
     if kind != "excel" or not any((excel or {}).values()):
         excel = None
     if sys.platform == "darwin":                      # Office cho Mac qua AppleScript
-        from .macintegration import office_to_pdf
-        used = office_to_pdf(src, dst, kind, excel)
+        from .macintegration import find_libreoffice, office_to_pdf
+        try:
+            used = office_to_pdf(src, dst, kind, excel)
+        except OfficeError:
+            if not find_libreoffice():          # Office cho Mac lỗi: còn LibreOffice thì chuyển bằng LibreOffice
+                raise
+            used = None
         if used:
             return dst, used
     if sys.platform == "win32":

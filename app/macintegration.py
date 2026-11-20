@@ -21,25 +21,37 @@ OFFICE_GROUP = os.path.expanduser("~/Library/Group Containers/UBF8T346G9.Office"
 APPS = {"word": "Microsoft Word", "excel": "Microsoft Excel", "powerpoint": "Microsoft PowerPoint"}
 
 _SCRIPTS = {
-    # 1.0.25: không dùng "active document" ngay sau "open" nữa – Word mở file bất đồng bộ (hộp thoại cấp quyền,
-    # chuyển định dạng .doc…) nên lệnh save as gửi tới chưa phải tài liệu -> lỗi -1708. Chờ tới khi tài liệu
-    # mở xong (tìm theo tên file), thử lưu PDF lại tới khi được.
+    # 1.0.25: Word mở file bất đồng bộ và có thể đang hiện hộp thoại (màn hình bắt đầu, đăng nhập, cấp quyền…):
+    # - không chờ lệnh "open" trả lời (lỗi -1712 hết thời gian chờ), đưa Word lên trước để thấy hộp thoại;
+    # - không dùng "active document" (lỗi -1708): chờ tài liệu theo tên file rồi mới lưu PDF.
     "word": '''on run argv
   set src to item 1 of argv
   set dst to item 2 of argv
   set srcName to ""
   if (count of argv) > 2 then set srcName to item 3 of argv
-  tell application "Microsoft Word" to open (POSIX file src)
-  set lastErr to "Word chưa mở xong tài liệu"
-  repeat 120 times
-    tell application "Microsoft Word"
-      try
-        set theDoc to missing value
-        repeat with i from 1 to (count of documents)
-          if (name of document i) is srcName then set theDoc to document i
-        end repeat
-        if theDoc is missing value and srcName is "" and (count of documents) > 0 then set theDoc to document 1
-        if theDoc is not missing value then
+  tell application "Microsoft Word" to activate
+  ignoring application responses
+    tell application "Microsoft Word" to open (POSIX file src)
+  end ignoring
+  set lastErr to "NOT_OPENED"
+  repeat 150 times
+    delay 1
+    set theDoc to missing value
+    try
+      with timeout of 10 seconds
+        tell application "Microsoft Word"
+          repeat with i from 1 to (count of documents)
+            if (name of document i) is srcName then set theDoc to document i
+          end repeat
+          if theDoc is missing value and srcName is "" and (count of documents) > 0 then set theDoc to document 1
+        end tell
+      end timeout
+    on error errMsg number errNum
+      set lastErr to errMsg & " (" & errNum & ")"
+    end try
+    if theDoc is not missing value then
+      with timeout of 300 seconds
+        tell application "Microsoft Word"
           try
             save as theDoc file name dst file format format PDF
           on error
@@ -48,13 +60,10 @@ _SCRIPTS = {
           try
             close theDoc saving no
           end try
-          return "OK"
-        end if
-      on error errMsg number errNum
-        set lastErr to errMsg & " (" & errNum & ")"
-      end try
-    end tell
-    delay 1
+        end tell
+      end timeout
+      return "OK"
+    end if
   end repeat
   error lastErr
 end run''',
@@ -130,7 +139,7 @@ def _unquarantine(path: str):
         pass
 
 
-def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, timeout: int = 180) -> str | None:
+def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, timeout: int = 480) -> str | None:
     """Chuyển bằng Microsoft Office cho Mac. Trả về tên ứng dụng đã dùng, None nếu máy không có Office."""
     from .office import OfficeError
     if not office_app_installed(kind):
@@ -164,6 +173,10 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
         if "-1743" in err or "Not authorized" in err:
             raise OfficeError(f"Máy chưa cho phép PDF Ký Số điều khiển {APPS[kind]}.\nVào Cài đặt hệ thống → Quyền "
                               "riêng tư & Bảo mật → Tự động hóa → bật PDF Ký Số → " + APPS[kind] + ", rồi thử lại.")
+        if "NOT_OPENED" in err or "-1712" in err:
+            raise OfficeError(f"{APPS[kind]} chưa mở được tài liệu (không phản hồi). Thường do {APPS[kind]} đang hiện "
+                              "một hộp thoại: màn hình chọn mẫu, đăng nhập tài khoản Microsoft, kích hoạt, cấp quyền "
+                              f"truy cập file… Hãy chuyển sang cửa sổ {APPS[kind]}, đóng hộp thoại đó rồi thử lại.")
         raise OfficeError(f"{APPS[kind]} báo lỗi khi chuyển sang PDF:\n{err[-600:]}")
     finally:
         shutil.rmtree(work, ignore_errors=True)

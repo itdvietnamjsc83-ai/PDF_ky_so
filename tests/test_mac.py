@@ -293,7 +293,7 @@ def test_pdf_services_applet_replaces_old_script(monkeypatch, tmp_path):
 def test_word_script_waits_for_document(monkeypatch, tmp_path):
     """Lỗi -1708 trên Mac: không gửi save as tới "active document" ngay sau open; chờ tài liệu theo tên file."""
     sc = macintegration._SCRIPTS["word"]
-    assert "active document" not in sc and "repeat 120 times" in sc and "srcName" in sc
+    assert "active document" not in sc and "ignoring application responses" in sc and "srcName" in sc
     monkeypatch.setattr(macintegration, "OFFICE_GROUP", str(tmp_path / "group"))
     monkeypatch.setattr(macintegration, "office_app_installed", lambda k: True)
     calls = []
@@ -310,3 +310,14 @@ def test_word_script_waits_for_document(monkeypatch, tmp_path):
     assert macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word") == "Microsoft Word"
     assert calls[0][:3] == ["/usr/bin/xattr", "-d", "com.apple.quarantine"]
     assert calls[1][-1] == "hop dong.docx"
+
+
+def test_word_not_responding_message(monkeypatch, tmp_path):
+    monkeypatch.setattr(macintegration, "OFFICE_GROUP", str(tmp_path / "group"))
+    monkeypatch.setattr(macintegration, "office_app_installed", lambda k: True)
+    monkeypatch.setattr(macintegration.subprocess, "run", lambda args, **k: subprocess.CompletedProcess(
+        args, 1, stdout="", stderr="187:208: execution error: Microsoft Word got an error: AppleEvent timed out. (-1712)"))
+    src = tmp_path / "a.docx"; src.write_bytes(b"PK")
+    from app.office import OfficeError
+    with pytest.raises(OfficeError, match="hộp thoại"):
+        macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word")
