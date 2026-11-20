@@ -45,44 +45,62 @@ def _kind(path: str) -> str:
 # Word: wdExportFormatPDF=17, tối ưu để in, có bookmark theo đề mục.
 # Excel: xlTypePDF=0, theo thiết lập trang in (Page Setup) của từng sheet, cả sổ làm việc.
 # PowerPoint: ppSaveAsPDF=32.
+# 1.0.25 – nhanh hơn:
+#  - nhiều file cùng loại: MỘT lần khởi động PowerShell + Word cho cả lô (trước: mỗi file một lần, mất vài giây/file);
+#  - Word không gắn thẻ cấu trúc (DocStructureTags) – bước này làm file lớn, nhiều trang xuất chậm gấp đôi, phần
+#    mềm không dùng tới; tắt vẽ màn hình (ScreenUpdating) trong lúc xuất.
+# Danh sách việc: file JSON [{"id", "src", "dst", "sheets", "fit", "orient"}]; kết quả từng dòng "OK<tab>id" hoặc
+# "ERR<tab>id<tab>lỗi"; không tạo được ứng dụng: "NOAPP<tab>lỗi".
 _PS = r"""
-param([string]$Src, [string]$Dst, [string]$Kind, [string]$Prog, [string]$Sheets = '', [string]$Fit = '',
-      [string]$Orient = '')
+param([string]$Jobs, [string]$Kind, [string]$Prog)
 $ErrorActionPreference = 'Stop'
-$app = $null; $doc = $null
+$list = @(Get-Content -Raw -Encoding UTF8 -LiteralPath $Jobs | ConvertFrom-Json)
+$app = $null
 try {
-  $app = New-Object -ComObject $Prog
+  try { $app = New-Object -ComObject $Prog }
+  catch { Write-Output ("NOAPP`t" + ($_.Exception.Message -replace "`r?`n", " ")); exit 0 }
   try { $app.DisplayAlerts = 0 } catch {}
-  if ($Kind -eq 'word') {
-    try { $app.Visible = $false } catch {}
-    $doc = $app.Documents.Open($Src, $false, $true, $false)
-    $doc.ExportAsFixedFormat($Dst, 17, $false, 0, 0, 0, 0, 0, $true, $true, 1, $true, $true, $false)
-  } elseif ($Kind -eq 'excel') {
-    try { $app.Visible = $false } catch {}
-    $doc = $app.Workbooks.Open($Src, 0, $true)
-    # tùy chọn xuất Excel: chỉ các sheet đã chọn (ẩn tạm sheet khác, không lưu vào file gốc), vừa trang, hướng
-    $want = @()
-    if ($Sheets -ne '') { $want = $Sheets -split '\|' }
-    foreach ($ws in $doc.Worksheets) {
-      if ($want.Count -gt 0 -and -not ($want -contains $ws.Name)) { try { $ws.Visible = 0 } catch {} ; continue }
-      if ($Fit -ne '' -or $Orient -ne '') {
-        try {
-          $ps = $ws.PageSetup
-          if ($Fit -eq 'page') { $ps.Zoom = $false; $ps.FitToPagesWide = 1; $ps.FitToPagesTall = 1 }
-          elseif ($Fit -eq 'width') { $ps.Zoom = $false; $ps.FitToPagesWide = 1; $ps.FitToPagesTall = $false }
-          if ($Orient -eq 'portrait') { $ps.Orientation = 1 } elseif ($Orient -eq 'landscape') { $ps.Orientation = 2 }
-        } catch {}
+  if ($Kind -ne 'powerpoint') { try { $app.Visible = $false } catch {} }
+  try { $app.ScreenUpdating = $false } catch {}
+  foreach ($j in $list) {
+    $doc = $null
+    try {
+      if ($Kind -eq 'word') {
+        $doc = $app.Documents.Open($j.src, $false, $true, $false)
+        $doc.ExportAsFixedFormat($j.dst, 17, $false, 0, 0, 0, 0, 0, $true, $true, 1, $false, $true, $false)
+      } elseif ($Kind -eq 'excel') {
+        $doc = $app.Workbooks.Open($j.src, 0, $true)
+        # tùy chọn xuất Excel: chỉ các sheet đã chọn (ẩn tạm sheet khác, không lưu vào file gốc), vừa trang, hướng
+        $want = @()
+        if ($j.sheets) { $want = $j.sheets -split '\|' }
+        foreach ($ws in $doc.Worksheets) {
+          if ($want.Count -gt 0 -and -not ($want -contains $ws.Name)) { try { $ws.Visible = 0 } catch {} ; continue }
+          if ($j.fit -or $j.orient) {
+            try {
+              $ps = $ws.PageSetup
+              if ($j.fit -eq 'page') { $ps.Zoom = $false; $ps.FitToPagesWide = 1; $ps.FitToPagesTall = 1 }
+              elseif ($j.fit -eq 'width') { $ps.Zoom = $false; $ps.FitToPagesWide = 1; $ps.FitToPagesTall = $false }
+              if ($j.orient -eq 'portrait') { $ps.Orientation = 1 } elseif ($j.orient -eq 'landscape') { $ps.Orientation = 2 }
+            } catch {}
+          }
+        }
+        $doc.ExportAsFixedFormat(0, $j.dst, 0, $true, $false)
+      } else {
+        $doc = $app.Presentations.Open($j.src, $true, $false, $false)
+        $doc.SaveAs($j.dst, 32)
       }
+      Write-Output ("OK`t" + $j.id)
+    } catch {
+      Write-Output ("ERR`t" + $j.id + "`t" + ($_.Exception.Message -replace "`r?`n", " "))
+    } finally {
+      if ($doc) { try { $doc.Close($false) } catch { try { $doc.Close() } catch {} } }
     }
-    $doc.ExportAsFixedFormat(0, $Dst, 0, $true, $false)
-  } else {
-    $doc = $app.Presentations.Open($Src, $true, $false, $false)
-    $doc.SaveAs($Dst, 32)
   }
-  Write-Output 'OK'
 } finally {
-  if ($doc) { try { $doc.Close($false) } catch { try { $doc.Close() } catch {} } }
-  if ($app) { try { $app.Quit() } catch {} ; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app) }
+  if ($app) {
+    try { $app.ScreenUpdating = $true } catch {}
+    try { $app.Quit() } catch {} ; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+  }
 }
 """
 
@@ -100,37 +118,65 @@ def _run(cmd, timeout=TIMEOUT, env=None) -> subprocess.CompletedProcess:
                           env=env)
 
 
-def _via_com(src: str, dst: str, kind: str, excel: dict | None = None) -> str | None:
-    """Trả về tên phần mềm đã dùng, None nếu máy không có Office/WPS."""
-    extra = []
-    if kind == "excel" and excel:
-        extra = ["-Sheets", "|".join(excel.get("sheets") or []), "-Fit", excel.get("fit") or "",
-                 "-Orient", excel.get("orientation") or ""]
+def _not_installed(msg: str) -> bool:
+    return "80040154" in msg or "class not registered" in msg.lower() or "Retrieving the COM class" in msg
+
+
+def _via_com_batch(jobs: list[dict], kind: str) -> tuple[str | None, dict[int, str]]:
+    """Chuyển cả lô file cùng loại trong MỘT phiên Office. jobs: [{"src", "dst", "excel"}].
+    Trả về (phần mềm đã dùng hoặc None nếu máy không có Office/WPS, {chỉ số việc lỗi: thông báo lỗi})."""
+    data = []
+    for k, j in enumerate(jobs):
+        x = j.get("excel") or {}
+        data.append({"id": k, "src": j["src"], "dst": j["dst"], "sheets": "|".join(x.get("sheets") or []),
+                     "fit": x.get("fit") or "", "orient": x.get("orientation") or ""})
     fd, script = tempfile.mkstemp(suffix=".ps1")
     with os.fdopen(fd, "w", encoding="utf-8-sig") as f:
         f.write(_PS)
+    fd, jobs_file = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
     try:
-        last = ""
         for prog in PROGIDS[kind]:
             try:
                 r = _run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
-                          "-Src", src, "-Dst", dst, "-Kind", kind, "-Prog", prog] + extra)
+                          "-Jobs", jobs_file, "-Kind", kind, "-Prog", prog], timeout=TIMEOUT * max(1, len(jobs)))
             except subprocess.TimeoutExpired:
                 raise OfficeError("Office không phản hồi (quá thời gian). Hãy đóng các hộp thoại Word/Excel đang mở "
                                   "rồi thử lại.")
-            if "OK" in r.stdout and os.path.exists(dst) and os.path.getsize(dst) > 0:
-                return prog
-            last = (r.stderr or r.stdout).strip()
-            if "80040154" in last or "class not registered" in last.lower() or "Retrieving the COM class" in last:
-                continue                                           # chưa cài phần mềm này -> thử phần mềm khác
-            if last:
-                raise OfficeError(f"{prog.split('.')[0]} báo lỗi khi chuyển sang PDF:\n{last[-600:]}")
-        return None
+            out = r.stdout or ""
+            noapp = [ln for ln in out.splitlines() if ln.startswith("NOAPP")]
+            if noapp:
+                if _not_installed(noapp[0]):
+                    continue                                       # chưa cài phần mềm này -> thử phần mềm khác
+                raise OfficeError(f"{prog.split('.')[0]} không khởi động được:\n{noapp[0][6:][-600:]}")
+            errs = {}
+            for k, j in enumerate(jobs):
+                ok = any(ln.strip().split("\t")[:2] == ["OK", str(k)] or (len(jobs) == 1 and ln.strip() == "OK")
+                         for ln in out.splitlines())
+                if ok and os.path.exists(j["dst"]) and os.path.getsize(j["dst"]) > 0:
+                    continue
+                msg = next((ln.split("\t", 2)[2] for ln in out.splitlines()
+                            if ln.startswith("ERR\t") and ln.split("\t")[1] == str(k) and ln.count("\t") >= 2), "")
+                errs[k] = msg or (r.stderr or out).strip()
+            if errs and len(errs) == len(jobs) and all(_not_installed(m) for m in errs.values()):
+                continue
+            return prog, errs
+        return None, {}
     finally:
-        try:
-            os.remove(script)
-        except OSError:
-            pass
+        for p in (script, jobs_file):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def _via_com(src: str, dst: str, kind: str, excel: dict | None = None) -> str | None:
+    """Trả về tên phần mềm đã dùng, None nếu máy không có Office/WPS."""
+    prog, errs = _via_com_batch([{"src": src, "dst": dst, "excel": excel}], kind)
+    if prog and errs:
+        raise OfficeError(f"{prog.split('.')[0]} báo lỗi khi chuyển sang PDF:\n{errs[0][-600:]}")
+    return prog
 
 
 def find_libreoffice() -> str | None:
@@ -221,17 +267,52 @@ def _prepare_excel_copy(src: str, excel: dict) -> str | None:
     return out
 
 
-def cached_pdf(src: str, excel: dict | None = None) -> tuple[str, str]:
-    """Chuyển và giữ bản PDF trong thư mục riêng (dùng cho khay ghép: file phải còn tới lúc ghép).
-    File Office không đổi thì dùng lại bản đã chuyển."""
+def _cache_path(src: str, excel: dict | None = None) -> str:
     import hashlib
+    if not any((excel or {}).values()):
+        excel = None
     st = os.stat(src)
     opt = json.dumps(excel or {}, sort_keys=True, ensure_ascii=False) if excel else ""
     key = hashlib.sha1(f"{os.path.abspath(src)}|{st.st_size}|{int(st.st_mtime)}|{opt}".encode("utf-8")).hexdigest()[:10]
-    dst = os.path.join(cache_dir(), f"{os.path.splitext(os.path.basename(src))[0]}_{key}.pdf")
+    return os.path.join(cache_dir(), f"{os.path.splitext(os.path.basename(src))[0]}_{key}.pdf")
+
+
+def cached_pdf(src: str, excel: dict | None = None) -> tuple[str, str]:
+    """Chuyển và giữ bản PDF trong thư mục riêng (file phải còn tới lúc ghép; mở lại file Word chưa sửa thì có ngay).
+    File Office không đổi thì dùng lại bản đã chuyển."""
+    dst = _cache_path(src, excel)
     if os.path.exists(dst) and os.path.getsize(dst) > 0:
         return dst, "đã chuyển trước đó"
     return to_pdf(src, dst, excel) if excel else to_pdf(src, dst)
+
+
+def prefetch(items: list[tuple[str, dict | None]]) -> dict[str, str]:
+    """Chuyển trước nhiều file Office vào bộ nhớ đệm: trên Windows mỗi loại (Word / Excel / PowerPoint) chỉ khởi động
+    Office MỘT lần cho cả lô. Sau đó cached_pdf() lấy ngay. Trả về {file: lỗi} (file lỗi để cached_pdf thử lại và báo)."""
+    todo = []
+    for src, excel in items:
+        if not is_office_file(src) or not os.path.isfile(src):
+            continue
+        kind = _kind(src)
+        if kind != "excel" or not any((excel or {}).values()):
+            excel = None
+        dst = _cache_path(src, excel)
+        if not (os.path.exists(dst) and os.path.getsize(dst) > 0):
+            todo.append({"src": os.path.abspath(src), "dst": dst, "excel": excel, "kind": kind})
+    errors: dict[str, str] = {}
+    if sys.platform != "win32" or len(todo) < 2:
+        return errors                                   # 1 file / Mac: cached_pdf chuyển như thường
+    for kind in ("word", "excel", "powerpoint"):
+        jobs = [j for j in todo if j["kind"] == kind]
+        if not jobs:
+            continue
+        try:
+            prog, errs = _via_com_batch(jobs, kind)
+        except OfficeError as e:
+            errors.update({j["src"]: str(e) for j in jobs})
+            continue
+        errors.update({jobs[k]["src"]: m for k, m in errs.items()})
+    return errors
 
 
 def to_pdf(src: str, dst: str | None = None, excel: dict | None = None) -> tuple[str, str]:

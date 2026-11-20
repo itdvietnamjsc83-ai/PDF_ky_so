@@ -290,6 +290,11 @@ class TrayDialog(QDialog):
         colors = self._office_colors(paths)
         if colors is None:
             return 0
+        par = self.parent()
+        if hasattr(par, "prefetch_office"):        # nhiều file Word/Excel: chuyển cả lô một lần
+            xo_all = getattr(self, "_excel_opts", {})
+            par.prefetch_office([(os.path.abspath(p), xo_all.get(os.path.abspath(p))) for p in paths
+                                 if is_office_file(p) and os.path.abspath(p) in colors])
         for p in paths:
             p = os.path.abspath(p)
             color = ""

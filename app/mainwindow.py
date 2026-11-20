@@ -1676,7 +1676,20 @@ class MainWindow(QMainWindow):
                    "*.ods *.csv *.ppt *.pptx *.odp *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp);;PDF (*.pdf);;"
                    "Tất cả (*.*)")
 
-    def convert_office(self, path: str, cached: bool = False, excel: dict | None = None):
+    def prefetch_office(self, items):
+        """Nhiều file Word/Excel: chuyển cả lô trong một phiên Office (nhanh hơn chuyển từng file)."""
+        from . import office
+        items = [(p, x) for p, x in items if office.is_office_file(p)]
+        if len(items) < 2 or sys.platform != "win32":
+            return
+        from .ui_sign import busy
+        try:
+            busy(self, f"Đang chuyển {len(items)} file Word / Excel / PowerPoint sang PDF (giữ nguyên khổ giấy)…",
+                 lambda: office.prefetch(items))
+        except Exception:
+            pass                              # từng file sẽ được chuyển lại và báo lỗi riêng
+
+    def convert_office(self, path: str, cached: bool = True, excel: dict | None = None):
         """Word/Excel/PowerPoint -> PDF bằng chính Office trên máy (giữ nguyên khổ giấy). Trả về đường dẫn PDF.
         excel: tùy chọn xuất Excel (sheet, vừa trang, hướng)."""
         from . import office
@@ -1757,6 +1770,7 @@ class MainWindow(QMainWindow):
             merge = len(chosen) > 1 and str(st.value("import/merge", "false")).lower() == "true"
         from .colormode import MODE_LABEL, convert_document
         from .office import is_office_file
+        self.prefetch_office([(p, excel_opts.get(p)) for p, _m in chosen])
         if merge:
             parts = []
             for p, mode in chosen:

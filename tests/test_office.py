@@ -140,3 +140,35 @@ def test_receive_files_tray_and_open(win, tmp_path, monkeypatch):
     assert len(items) == 2 and items[0].path.endswith(".pdf") and items[0].page_count == 2
     assert items[0].color == "blacktext" and items[1].color == ""
     win._tray.close()
+
+
+def test_com_batch_one_session(tmp_path, monkeypatch):
+    """Nhiều file Word: một lần PowerShell + Word cho cả lô; file lỗi được báo riêng."""
+    import json as _json
+    calls = []
+
+    def fake_run(cmd, timeout=0, env=None):
+        calls.append(cmd)
+        jobs = _json.load(open(cmd[cmd.index("-Jobs") + 1], encoding="utf-8"))
+        out = []
+        for j in jobs:
+            if "hong" in j["src"]:
+                out.append(f"ERR\t{j['id']}\tFile hỏng")
+            else:
+                open(j["dst"], "wb").write(b"%PDF-1.4 ok")
+                out.append(f"OK\t{j['id']}")
+        return subprocess.CompletedProcess(cmd, 0, "\n".join(out) + "\n", "")
+    monkeypatch.setattr(office, "_run", fake_run)
+    monkeypatch.setattr(office.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    files = []
+    for n in ("a.docx", "b.docx", "hong.docx"):
+        f = tmp_path / n
+        f.write_bytes(b"x")
+        files.append(str(f))
+    errs = office.prefetch([(f, None) for f in files])
+    assert len(calls) == 1 and list(errs) == [files[2]] and "hỏng" in errs[files[2]]
+    monkeypatch.setattr(office, "to_pdf", lambda *a, **k: (_ for _ in ()).throw(AssertionError("không chuyển lại")))
+    assert office.cached_pdf(files[0])[1] == "đã chuyển trước đó"
+    script = office._PS
+    assert "1, $false, $true, $false)" in script and "ScreenUpdating = $false" in script   # không gắn thẻ cấu trúc

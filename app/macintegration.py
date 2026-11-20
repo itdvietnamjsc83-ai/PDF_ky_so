@@ -34,8 +34,8 @@ _SCRIPTS = {
     tell application "Microsoft Word" to open (POSIX file src)
   end ignoring
   set lastErr to "NOT_OPENED"
-  repeat 150 times
-    delay 1
+  repeat 500 times
+    delay 0.3
     set theDoc to missing value
     try
       with timeout of 10 seconds
