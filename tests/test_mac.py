@@ -309,7 +309,7 @@ def test_word_script_waits_for_document(monkeypatch, tmp_path):
     src.write_bytes(b"PK")
     assert macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word") == "Microsoft Word"
     assert calls[0][:3] == ["/usr/bin/xattr", "-d", "com.apple.quarantine"]
-    assert calls[1][-1] == "hop dong.docx"
+    assert calls[1][-1].startswith("pdfkyso_") and calls[1][-1].endswith(".docx") and calls[1][-1].isascii()
 
 
 def test_word_not_responding_message(monkeypatch, tmp_path):

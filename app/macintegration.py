@@ -150,9 +150,12 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
     except OSError:
         work = tempfile.mkdtemp(prefix="pdfkyso-office-")
     try:
-        tmp_src = os.path.join(work, os.path.basename(src))
+        # tên tạm chỉ chữ không dấu, duy nhất: tên có dấu tiếng Việt trên Mac có 2 cách mã hóa Unicode (NFC/NFD) nên
+        # tìm tài liệu theo tên trong Word có thể không khớp; tên duy nhất để không nhầm với file mở dở lần trước
+        tag = "pdfkyso_" + uuid.uuid4().hex[:12]
+        tmp_src = os.path.join(work, tag + os.path.splitext(src)[1].lower())
         shutil.copy2(src, tmp_src)
-        tmp_dst = os.path.join(work, os.path.splitext(os.path.basename(src))[0] + ".pdf")
+        tmp_dst = os.path.join(work, tag + ".pdf")
         _unquarantine(tmp_src)
         args = ["/usr/bin/osascript", "-e", _SCRIPTS[kind], tmp_src, tmp_dst]
         if kind == "word":
