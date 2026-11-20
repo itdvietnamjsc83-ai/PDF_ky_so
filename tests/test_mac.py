@@ -335,7 +335,7 @@ def test_office_group_blocked_uses_fixed_folder(monkeypatch, tmp_path):
     """macOS 15: ghi vào thư mục nhóm Office bị chặn -> dùng thư mục cố định của PDF Ký Số (Word cấp quyền một lần),
     không dùng thư mục tạm hệ thống (Word trong hộp cát không vào được -> treo)."""
     blocked = tmp_path / "group"
-    blocked.write_text("không phải thư mục")          # makedirs lỗi như "Operation not permitted"
+    blocked.write_text("khong phai thu muc")          # makedirs lỗi như "Operation not permitted"
     fixed = tmp_path / "ChuyenOffice"
     monkeypatch.setattr(macintegration, "OFFICE_GROUP", str(blocked))
     monkeypatch.setattr(macintegration, "office_work_dir", lambda: str(fixed))
