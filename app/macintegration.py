@@ -144,17 +144,26 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
     from .office import OfficeError
     if not office_app_installed(kind):
         return None
-    work = os.path.join(OFFICE_GROUP, "PdfKySo", uuid.uuid4().hex[:10])
+    # Thư mục trung gian Office (chạy trong hộp cát) đọc / ghi được:
+    # 1) thư mục nhóm của Office – macOS cũ cho ghi thẳng, Office không hỏi gì;
+    # 2) macOS 15 trở lên chặn ứng dụng khác ghi vào đó ("Operation not permitted") -> dùng một thư mục CỐ ĐỊNH của
+    #    PDF Ký Số; lần đầu Word hỏi "Cấp quyền truy cập" thư mục này, cấp một lần là dùng mãi.
+    #    (bản trước rơi vào thư mục tạm của hệ thống, mỗi lần một chỗ, Word không vào được -> treo / báo lỗi)
+    tag = "pdfkyso_" + uuid.uuid4().hex[:12]
+    ext = os.path.splitext(src)[1].lower()
+    work, tmp_src, own_dir = None, None, False
+    for base in (os.path.join(OFFICE_GROUP, "PdfKySo"), office_work_dir()):
+        try:
+            os.makedirs(base, exist_ok=True)
+            cand = os.path.join(base, tag + ext)
+            shutil.copy2(src, cand)
+            work, tmp_src, own_dir = base, cand, base != office_work_dir()
+            break
+        except OSError:
+            continue
+    if work is None:
+        raise OfficeError("Không chép được file sang thư mục trung gian để chuyển bằng " + APPS[kind] + ".")
     try:
-        os.makedirs(work, exist_ok=True)
-    except OSError:
-        work = tempfile.mkdtemp(prefix="pdfkyso-office-")
-    try:
-        # tên tạm chỉ chữ không dấu, duy nhất: tên có dấu tiếng Việt trên Mac có 2 cách mã hóa Unicode (NFC/NFD) nên
-        # tìm tài liệu theo tên trong Word có thể không khớp; tên duy nhất để không nhầm với file mở dở lần trước
-        tag = "pdfkyso_" + uuid.uuid4().hex[:12]
-        tmp_src = os.path.join(work, tag + os.path.splitext(src)[1].lower())
-        shutil.copy2(src, tmp_src)
         tmp_dst = os.path.join(work, tag + ".pdf")
         _unquarantine(tmp_src)
         args = ["/usr/bin/osascript", "-e", _SCRIPTS[kind], tmp_src, tmp_dst]
@@ -172,6 +181,8 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
         if made:
             shutil.move(made, dst)
             return APPS[kind]
+        hint_grant = "" if own_dir else (f"\nLần đầu {APPS[kind]} hỏi \"Cấp quyền truy cập\" (Grant Access) thư mục "
+                                         f"{work}: hãy bấm Chọn / Cấp quyền rồi thử lại.")
         err = (r.stderr or r.stdout).strip()
         if "-1743" in err or "Not authorized" in err:
             raise OfficeError(f"Máy chưa cho phép PDF Ký Số điều khiển {APPS[kind]}.\nVào Cài đặt hệ thống → Quyền "
@@ -179,10 +190,18 @@ def office_to_pdf(src: str, dst: str, kind: str, excel: dict | None = None, time
         if "NOT_OPENED" in err or "-1712" in err:
             raise OfficeError(f"{APPS[kind]} chưa mở được tài liệu (không phản hồi). Thường do {APPS[kind]} đang hiện "
                               "một hộp thoại: màn hình chọn mẫu, đăng nhập tài khoản Microsoft, kích hoạt, cấp quyền "
-                              f"truy cập file… Hãy chuyển sang cửa sổ {APPS[kind]}, đóng hộp thoại đó rồi thử lại.")
+                              f"truy cập file… Hãy chuyển sang cửa sổ {APPS[kind]}, đóng hộp thoại đó rồi thử lại." + hint_grant)
         raise OfficeError(f"{APPS[kind]} báo lỗi khi chuyển sang PDF:\n{err[-600:]}")
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        for p in (tmp_src, os.path.join(work, tag + ".pdf"), os.path.join(work, tag + ".pdf.pdf")):
+            try:
+                os.remove(p)                 # chỉ xóa file tạm của chính lần chuyển này
+            except OSError:
+                pass
+
+
+def office_work_dir() -> str:
+    return os.path.expanduser("~/Library/Application Support/PdfKySo/ChuyenOffice")
 
 
 def find_libreoffice() -> str | None:

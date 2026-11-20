@@ -329,3 +329,25 @@ def test_import_no_ask_with_saved_image_opts(tmp_path):
     from app.mainwindow import MainWindow
     src = inspect.getsource(MainWindow.import_files)
     assert src.index("chosen = [(p,") < src.index("image_opts = {p: saved for p, _m in chosen}")
+
+
+def test_office_group_blocked_uses_fixed_folder(monkeypatch, tmp_path):
+    """macOS 15: ghi vào thư mục nhóm Office bị chặn -> dùng thư mục cố định của PDF Ký Số (Word cấp quyền một lần),
+    không dùng thư mục tạm hệ thống (Word trong hộp cát không vào được -> treo)."""
+    blocked = tmp_path / "group"
+    blocked.write_text("không phải thư mục")          # makedirs lỗi như "Operation not permitted"
+    fixed = tmp_path / "ChuyenOffice"
+    monkeypatch.setattr(macintegration, "OFFICE_GROUP", str(blocked))
+    monkeypatch.setattr(macintegration, "office_work_dir", lambda: str(fixed))
+    monkeypatch.setattr(macintegration, "office_app_installed", lambda k: True)
+    seen = []
+
+    def fake_run(args, **k):
+        if args[0] == "/usr/bin/osascript":
+            seen.append(args[3])
+            open(args[4], "wb").write(b"%PDF-1.7 ok")
+        return subprocess.CompletedProcess(args, 0, stdout="OK", stderr="")
+    monkeypatch.setattr(macintegration.subprocess, "run", fake_run)
+    src = tmp_path / "Hợp đồng.docx"; src.write_bytes(b"PK")
+    assert macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word") == "Microsoft Word"
+    assert seen[0].startswith(str(fixed)) and os.listdir(fixed) == []
