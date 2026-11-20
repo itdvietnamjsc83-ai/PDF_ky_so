@@ -1752,8 +1752,8 @@ class MainWindow(QMainWindow):
                 saved = _json.loads(st.value("import/image_opts", "") or "{}")
             except Exception:
                 saved = {}
-            image_opts = {p: saved for p, _m in chosen} if saved else {}
             chosen = [(p, "color" if p.lower().endswith(".pdf") else default) for p in paths]
+            image_opts = {p: saved for p, _m in chosen} if saved else {}
             merge = len(chosen) > 1 and str(st.value("import/merge", "false")).lower() == "true"
         from .colormode import MODE_LABEL, convert_document
         from .office import is_office_file

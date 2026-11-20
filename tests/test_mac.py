@@ -321,3 +321,11 @@ def test_word_not_responding_message(monkeypatch, tmp_path):
     from app.office import OfficeError
     with pytest.raises(OfficeError, match="hộp thoại"):
         macintegration.office_to_pdf(str(src), str(tmp_path / "o.pdf"), "word")
+
+
+def test_import_no_ask_with_saved_image_opts(tmp_path):
+    """Đã chọn "Không hỏi lại" + có tùy chọn ảnh đã lưu: không được lỗi (biến chosen dùng trước khi gán)."""
+    import inspect
+    from app.mainwindow import MainWindow
+    src = inspect.getsource(MainWindow.import_files)
+    assert src.index("chosen = [(p,") < src.index("image_opts = {p: saved for p, _m in chosen}")
